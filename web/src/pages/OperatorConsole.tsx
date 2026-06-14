@@ -97,13 +97,15 @@ export function OperatorConsole() {
     const entered = code.trim();
     if (!entered) return;
     setError(null);
-    // ¿Es una clave fija de equipo (Lite)? Intentar conectar por clave.
+    // ¿Es una clave fija de equipo? Intentar conectar por clave (requiere login + acceso).
     try {
       const res = await fetch('/api/device/connect', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'omit',
+        method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ accessKey: entered }),
       });
       if (res.ok) { const data = await res.json(); connectWith(data.code); return; }
+      if (res.status === 401) { setError('Inicia sesión para conectarte a un equipo por su clave.'); return; }
+      if (res.status === 403) { setError('No tienes acceso a ese equipo.'); return; }
       if (res.status === 409) { setError('Ese equipo no está en línea en este momento.'); return; }
       // 404 → no es una clave de equipo; se trata como código de soporte efímero.
     } catch { /* sin acceso → intentar como código directo */ }

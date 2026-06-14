@@ -37,13 +37,12 @@ if ($Server) {
 }
 
 Push-Location $agentDir
-& $cargo build --release
+# Exe unico cliente/servidor estilo TeamViewer (host siempre + login + visor nativo).
+& $cargo build --release --bin remotix
 Pop-Location
 
-# Dos binarios: el agente completo (chat) y la version Lite (clave unica, tipo TeamViewer).
 $bins = @(
-    @{ exe = 'remotix-agent.exe'; desc = 'agente completo (chat + control)' },
-    @{ exe = 'remotix-lite.exe';  desc = 'Lite (clave unica, control + archivos)' }
+    @{ exe = 'remotix.exe'; desc = 'Remotix (cliente/servidor unificado: aceptar y conectar)' }
 )
 New-Item -ItemType Directory -Force -Path $publicDir | Out-Null
 foreach ($b in $bins) {
@@ -53,7 +52,7 @@ foreach ($b in $bins) {
     Copy-Item $exe (Join-Path $publicDir $b.exe) -Force
     Write-Host "Listo: $publicDir\$($b.exe)  - $($b.desc)" -ForegroundColor Green
 }
-Write-Host "`nDescargas: /download/remotix-lite.exe (boton en /ayuda) y /download/remotix-agent.exe." -ForegroundColor Green
+Write-Host "`nDescarga: /download/remotix.exe (un solo programa para todos)." -ForegroundColor Green
 if (-not $Sign) {
     Write-Host "AVISO: sin firmar. Windows SmartScreen advertira a los usuarios. Usa -Sign con tu certificado antes de produccion." -ForegroundColor Yellow
 }

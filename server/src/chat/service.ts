@@ -105,7 +105,7 @@ export async function addChannelMembers(channelId: string, memberIds: string[]):
   if (memberIds.length === 0) return;
   const now = new Date();
   for (const memberId of memberIds) {
-    await db.insert(tables.channelMembers).values({ channelId, memberId, createdAt: now }).onConflictDoNothing();
+    await db.insert(tables.channelMembers).values({ channelId, memberId, createdAt: now }).onDuplicateKeyUpdate({ set: { memberId } });
   }
 }
 

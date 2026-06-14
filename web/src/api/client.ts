@@ -35,6 +35,16 @@ export interface Equipo {
   id: string; projectId: string; name: string; os: string | null; hostname: string | null;
   pinMode: 'none' | 'required'; lastSeenAt: number | null; createdAt: number;
 }
+// PC en el modelo TeamViewer: dueño + accesos + estado online.
+export interface Device {
+  id: string; accessKey: string; name: string; ownerId: string | null;
+  os: string | null; hostname: string | null;
+  lastSeenAt: string | null; createdAt: string;
+  role: 'owner' | 'granted'; online: boolean;
+}
+export interface DeviceGrant {
+  principalId: string; kind: 'user' | 'group'; label: string; name?: string;
+}
 export interface PairingCode {
   pairingCode: string; projectId: string; expiresAt: string;
 }

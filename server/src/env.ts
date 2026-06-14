@@ -4,9 +4,18 @@ function list(value: string | undefined, fallback: string): string[] {
 
 export const env = {
   port: Number(process.env.PORT ?? 8080),
-  dbPath: process.env.REMOTIX_DB ?? './remotix.db',
   sessionSecret: process.env.SESSION_SECRET ?? 'dev-only-change-me',
   isDev: process.env.NODE_ENV !== 'production',
+
+  // Base de datos MySQL (servidor existente; credenciales por entorno).
+  mysql: {
+    host: process.env.MYSQL_HOST ?? '127.0.0.1',
+    port: Number(process.env.MYSQL_PORT ?? 3306),
+    user: process.env.MYSQL_USER ?? 'remotix',
+    password: process.env.MYSQL_PASSWORD ?? '',
+    database: process.env.MYSQL_DATABASE ?? 'remotix',
+    connectionLimit: Number(process.env.MYSQL_POOL ?? 10),
+  },
 
   // WebRTC ICE / NAT traversal.
   stunUrls: list(process.env.STUN_URLS, 'stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302'),

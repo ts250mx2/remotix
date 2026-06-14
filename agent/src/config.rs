@@ -38,12 +38,18 @@ impl AgentConfig {
 }
 
 /// Configuración persistente del Lite desatendido (clave fija permanente).
+/// `session_token`/`user_email` guardan el login del usuario en el exe (para
+/// mantener la sesión entre arranques: rol operador).
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct LiteConfig {
     pub server: String,
     pub device_id: String,
     pub access_key: String,
     pub secret: String,
+    #[serde(default)]
+    pub session_token: Option<String>,
+    #[serde(default)]
+    pub user_email: Option<String>,
 }
 
 fn lite_path() -> PathBuf {
@@ -61,6 +67,14 @@ impl LiteConfig {
     pub fn save(&self) {
         if let Ok(data) = serde_json::to_string_pretty(self) {
             let _ = std::fs::write(lite_path(), data);
+        }
+    }
+    /// Persiste (o limpia) el login del usuario en este equipo.
+    pub fn set_session(token: Option<String>, email: Option<String>) {
+        if let Some(mut c) = LiteConfig::load() {
+            c.session_token = token;
+            c.user_email = email;
+            c.save();
         }
     }
     pub fn ws_device_url(&self) -> String { to_ws(&self.server, "/ws/device") }

@@ -44,7 +44,8 @@ export const groupRoutes = new Hono()
     const { userId } = c.req.valid('json');
     const u = await db.select().from(tables.users).where(eq(tables.users.id, userId));
     if (u.length === 0) return c.json({ error: 'user_not_found' }, 404);
-    await db.insert(tables.groupMembers).values({ groupId, userId }).onConflictDoNothing();
+    // MySQL: no-op si ya existe (set de una columna de la PK a su mismo valor).
+    await db.insert(tables.groupMembers).values({ groupId, userId }).onDuplicateKeyUpdate({ set: { groupId } });
     return c.json({ ok: true });
   })
 

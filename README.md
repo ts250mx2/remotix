@@ -129,7 +129,9 @@ arriba) y `node server/agent-handshake-test.mjs <CODE>` (con un agente hosteando
 | Variable | Default | Descripción |
 |---|---|---|
 | `PORT` | `8080` | Puerto HTTP+WS |
-| `REMOTIX_DB` | `./remotix.db` | Ruta del SQLite |
+| `MYSQL_HOST` / `MYSQL_PORT` | `127.0.0.1` / `3306` | Servidor MySQL |
+| `MYSQL_USER` / `MYSQL_PASSWORD` | `remotix` / _(vacío)_ | Credenciales MySQL |
+| `MYSQL_DATABASE` | `remotix` | Base de datos |
 | `SESSION_SECRET` | `dev-only-change-me` | **Obligatorio en producción** |
 | `STUN_URLS` | STUN de Google | Lista separada por comas |
 | `TURN_HOST` | _(vacío)_ | Host del TURN; vacío = sin TURN (solo STUN) |

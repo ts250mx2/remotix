@@ -59,15 +59,17 @@ Ver logs: `docker compose logs -f caddy server coturn`.
 - `/conectar` → cliente: pega el UUID y chatea como su PC.
 - Salud: `curl https://soporte.tudominio.com/health` → `{"ok":true}`.
 
-## 7. Agente (instalable) apuntando a tu dominio
+## 7. Remotix (exe único cliente/servidor) apuntando a tu dominio
 En una máquina Windows con Rust:
 ```powershell
 infra\build-agent.ps1 -Server https://soporte.tudominio.com -Sign   # firma si tienes certificado
 ```
-Copia `agent\target\release\remotix-agent.exe` a `server/public/remotix-agent.exe`
-del VPS (o súbelo); se descargará desde `https://soporte.tudominio.com/download/remotix-agent.exe`
-(botón en `/conectar`). **Sin firma**, Windows mostrará advertencia a los usuarios
-(ver `infra/sign.ps1`).
+Genera `agent\target\release\remotix.exe` y lo copia a `server/public/remotix.exe`
+(súbelo al VPS si compilas en otra máquina); se descarga desde
+`https://soporte.tudominio.com/download/remotix.exe` (enlace en `/` y `/ayuda`).
+Un solo programa para todos: **sin login** solo acepta conexiones (muestra su clave);
+**con login** además se conecta a las PCs que le dieron acceso (visor nativo).
+**Sin firma**, Windows mostrará advertencia a los usuarios (ver `infra/sign.ps1`).
 
 ## 8. Actualizar
 ```bash
@@ -110,5 +112,5 @@ Nginx en 80/443 — nombra siempre `server coturn`. Al actualizar la web, repite
 ## Troubleshooting
 - **No saca certificado:** revisa que el DNS apunte al VPS y que 80/443 estén abiertos. `docker compose logs caddy`.
 - **El control remoto / vídeo no conecta entre redes distintas:** suele ser el relay TURN. Verifica los puertos UDP. Si el VPS está detrás de NAT 1:1, añade al comando de `coturn` en `docker-compose.yml`: `--external-ip=<IP_PUBLICA>`.
-- **better-sqlite3 falla al construir:** el `server/Dockerfile` ya instala python3/make/g++; reconstruye con `docker compose build --no-cache server`.
-- **Datos:** la base vive en el volumen `remotix-data`. Respáldalo con `docker run --rm -v remotix_remotix-data:/d -v $PWD:/b alpine tar czf /b/remotix-db.tgz -C /d .`.
+- **El server no arranca / `ECONNREFUSED`:** revisa `MYSQL_HOST/PORT/USER/PASSWORD/DATABASE` en `.env`. Desde un contenedor, `MYSQL_HOST=127.0.0.1` apunta al propio contenedor: usa la IP del host o `host.docker.internal`. El usuario MySQL debe tener `GRANT ALL ON remotix.*`.
+- **Datos:** la base es MySQL (servidor externo). Respáldala con `mysqldump remotix > remotix.sql`. El esquema se crea solo al arrancar (idempotente).

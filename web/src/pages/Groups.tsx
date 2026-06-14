@@ -68,8 +68,8 @@ export function Groups() {
       <Topbar />
       <main className="container">
         <section className="card">
-          <h2>Nuevo grupo de técnicos</h2>
-          <p className="muted small">Agrupa técnicos para asignarlos a varios proyectos de una vez.</p>
+          <h2>Nuevo grupo</h2>
+          <p className="muted small">Agrupa usuarios para darles acceso a varias PCs de una vez.</p>
           <form onSubmit={onCreate} className="row">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre del grupo (ej. soporte-méxico)" />
             <button type="submit" disabled={creating}>{creating ? 'Creando…' : 'Crear'}</button>

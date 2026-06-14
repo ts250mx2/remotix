@@ -43,10 +43,7 @@ export function Login() {
         <p className="muted small">¿No tienes cuenta? <Link to="/register">Crea una</Link>.</p>
         <hr className="sep" />
         <p className="muted small helpdesk-links">
-          Soporte instantáneo (sin cuenta): <Link to="/ayuda">Necesito ayuda</Link> · <Link to="/operador">Soy técnico</Link>
-        </p>
-        <p className="muted small helpdesk-links">
-          ¿Tu proveedor te dio un código de proyecto? <Link to="/conectar">Conectar al chat de soporte</Link>
+          ¿Soporte rápido sin cuenta? <Link to="/ayuda">Compartir mi pantalla</Link> · <Link to="/operador">Conectar a un equipo</Link>
         </p>
       </form>
     </main>

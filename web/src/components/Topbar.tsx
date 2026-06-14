@@ -14,9 +14,10 @@ export function Topbar() {
     <header className="topbar">
       <Link to="/" className="brand">Remotix</Link>
       <nav>
-        <Link to="/chat">Chat</Link>
-        <Link to="/">Empresas</Link>
+        <Link to="/">Mis PCs</Link>
         <Link to="/groups">Grupos</Link>
+        <Link to="/users">Usuarios</Link>
+        <Link to="/operador">Conectar por clave</Link>
       </nav>
       <div className="topbar-right">
         {user && (

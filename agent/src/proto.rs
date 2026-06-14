@@ -18,6 +18,9 @@ pub enum Outgoing {
     Signal { payload: SignalPayload },
     #[serde(rename = "chat")]
     Chat { text: String },
+    // Rol operador (visor nativo): unirse a una sala por código.
+    #[serde(rename = "join")]
+    Join { code: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,6 +36,18 @@ pub enum Incoming {
     PeerJoined,
     #[serde(rename = "peer-left")]
     PeerLeft,
+    // Respuesta a `join` (rol operador): el host está presente / aún no.
+    #[serde(rename = "joined")]
+    Joined {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        mode: Option<String>,
+        #[serde(default)]
+        caps: Vec<String>,
+    },
+    #[serde(rename = "waiting")]
+    Waiting,
     #[serde(rename = "signal")]
     Signal { payload: SignalPayload },
     #[serde(rename = "chat")]

@@ -32,8 +32,12 @@ Step "Compilando el servidor"
 Push-Location "$root\server"; npm run build; Pop-Location
 
 # 5) Arrancar.
-$dataDir = "$root\server"
-$env:REMOTIX_DB = "$dataDir\remotix.db"
+# La base de datos es MySQL: usa las variables MYSQL_* del entorno (o el .env del
+# server). Ajusta MYSQL_HOST/USER/PASSWORD/DATABASE antes de arrancar.
+if (-not $env:MYSQL_HOST)     { $env:MYSQL_HOST = '127.0.0.1' }
+if (-not $env:MYSQL_PORT)     { $env:MYSQL_PORT = '3306' }
+if (-not $env:MYSQL_USER)     { $env:MYSQL_USER = 'remotix' }
+if (-not $env:MYSQL_DATABASE) { $env:MYSQL_DATABASE = 'remotix' }
 $urlOperador = "http://localhost:$port/operador"
 $urlAyuda    = "http://localhost:$port/ayuda"
 

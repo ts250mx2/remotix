@@ -10,6 +10,7 @@ import { groupRoutes } from './routes/groups.js';
 import { turnRoutes } from './routes/turn.js';
 import { chatRoutes } from './routes/chat.js';
 import { deviceRoutes } from './routes/device.js';
+import { deviceManageRoutes } from './routes/devices.js';
 import { attachWebStatic, attachDownloads } from './static.js';
 import { env } from './env.js';
 
@@ -37,7 +38,8 @@ app
   .route('/api/groups', groupRoutes)
   .route('/api/turn-credentials', turnRoutes)
   .route('/api/chat', chatRoutes)
-  .route('/api/device', deviceRoutes);
+  .route('/api/device', deviceRoutes)
+  .route('/api/devices', deviceManageRoutes);
 
 // Descarga del agente (antes de la SPA, para que /download no caiga en el fallback).
 attachDownloads(app);

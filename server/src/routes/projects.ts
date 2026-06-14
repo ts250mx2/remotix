@@ -125,10 +125,7 @@ export const projectRoutes = new Hono()
 
     await db.insert(tables.projectMembers)
       .values({ projectId, principalId, role: memberRole })
-      .onConflictDoUpdate({
-        target: [tables.projectMembers.projectId, tables.projectMembers.principalId],
-        set: { role: memberRole },
-      });
+      .onDuplicateKeyUpdate({ set: { role: memberRole } });
     return c.json({ ok: true });
   })
 

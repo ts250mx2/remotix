@@ -92,7 +92,7 @@ export function ClientSupport() {
             ¿El técnico necesita <strong>controlar</strong> tu equipo (mouse, teclado y archivos)?
             Descarga Remotix, ábrelo y dile la <strong>clave</strong> que aparece. Sin instalación.
           </p>
-          <a className="download-btn" href="/download/remotix-lite.exe" download>
+          <a className="download-btn" href="/download/remotix.exe" download>
             Descargar Remotix · control remoto (Windows)
           </a>
         </form>

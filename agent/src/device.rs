@@ -25,7 +25,13 @@ pub async fn register_device(server: &str, name: &str) -> anyhow::Result<LiteCon
         anyhow::bail!("no se pudo registrar ({})", resp.status());
     }
     let r: Resp = resp.json().await?;
-    Ok(LiteConfig { server: server.trim().to_string(), device_id: r.device_id, access_key: r.access_key, secret: r.secret })
+    Ok(LiteConfig {
+        server: server.trim().to_string(),
+        device_id: r.device_id,
+        access_key: r.access_key,
+        secret: r.secret,
+        ..Default::default()
+    })
 }
 
 /// Orquestador del Lite: registra (con reintento) si no hay config, activa el

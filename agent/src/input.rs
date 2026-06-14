@@ -7,10 +7,12 @@ use std::sync::mpsc::{channel, Sender};
 use enigo::{
     Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
-#[derive(Debug, Deserialize)]
+// `Serialize` además de `Deserialize` para que el rol operador (visor nativo)
+// emita exactamente el mismo formato que consume el host.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "k")]
 pub enum InputEvent {
     #[serde(rename = "move")]

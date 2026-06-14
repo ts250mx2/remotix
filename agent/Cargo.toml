@@ -9,6 +9,11 @@ license = "Proprietary"
 name = "remotix_agent"
 path = "src/lib.rs"
 
+# Exe unificado cliente/servidor (TeamViewer): host siempre + login + visor nativo.
+[[bin]]
+name = "remotix"
+path = "src/bin/remotix.rs"
+
 [[bin]]
 name = "remotix-agent"
 path = "src/bin/remotix-agent.rs"
