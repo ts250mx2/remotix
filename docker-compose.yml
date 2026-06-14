@@ -56,7 +56,7 @@ services:
       --realm=${DOMAIN:?set DOMAIN in .env}
       --listening-port=3478
       --min-port=49160 --max-port=49200
-      --fingerprint --no-multicast-peers --no-cli --no-tlsv1 --no-tlsv1_1
+      --fingerprint --no-multicast-peers --no-cli
     restart: unless-stopped
 
 volumes:
