@@ -71,11 +71,20 @@ Un solo programa para todos: **sin login** solo acepta conexiones (muestra su cl
 **con login** además se conecta a las PCs que le dieron acceso (visor nativo).
 **Sin firma**, Windows mostrará advertencia a los usuarios (ver `infra/sign.ps1`).
 
-## 8. Actualizar
+## 8. Actualizar (modo híbrido, detrás de tu Nginx)
 ```bash
 git pull
-docker compose up -d --build
+# 1) .env: asegúrate de tener las variables MySQL (ver paso 5). Sin ellas el server no arranca.
+# 2) Reconstruye y reinicia SOLO server + coturn (NO Caddy):
+docker compose -f docker-compose.yml -f docker-compose.nginx.yml up -d --build server coturn
+docker compose -f docker-compose.yml -f docker-compose.nginx.yml logs --tail=20 server   # "[db] MySQL conectado…"
+curl -s http://127.0.0.1:8080/health    # {"ok":true}
+# 3) Recompila la web (cambió la SPA) y cópiala donde la sirve Nginx:
+docker run --rm -v "$PWD/web":/web -w /web node:22-alpine sh -lc "npm ci || npm install; npm run build"
+sudo cp -r web/dist/* /var/www/remotix/
+# 4) El remotix.exe viene versionado en el repo; se sirve en /download/remotix.exe.
 ```
+No hace falta tocar Nginx (las rutas no cambiaron). El esquema MySQL se crea solo al arrancar.
 
 ## Alternativa: detrás de tu propio Nginx (sin Caddy)
 
