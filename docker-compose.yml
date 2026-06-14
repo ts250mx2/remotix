@@ -1,0 +1,65 @@
+# Despliegue de Remotix en internet: servidor (API + señalización + chat WS)
+# detrás de Caddy (HTTPS automático con Let's Encrypt, sirve la consola web) +
+# coturn (TURN/STUN para WebRTC: control remoto y videollamadas).
+#
+# Solo necesitas Docker en el VPS (la web se compila dentro de la imagen).
+#   1) cp .env.example .env  y rellena DOMAIN, ACME_EMAIL, SESSION_SECRET, TURN_SECRET
+#   2) DNS: registro A de DOMAIN → IP pública del VPS
+#   3) Firewall: 80/tcp, 443/tcp, 3478/udp, 3478/tcp, 49160-49200/udp
+#   4) docker compose up -d --build
+#   (Opcional) coloca el agente firmado en server/public/remotix-agent.exe para /download.
+services:
+  server:
+    build: ./server
+    container_name: remotix-server
+    environment:
+      - PORT=8080
+      - NODE_ENV=production
+      - REMOTIX_DB=/data/remotix.db
+      - SESSION_SECRET=${SESSION_SECRET:?set SESSION_SECRET in .env}
+      - TURN_HOST=${DOMAIN:?set DOMAIN in .env}
+      - TURN_SECRET=${TURN_SECRET:?set TURN_SECRET in .env}
+      - TURN_PORT=3478
+    volumes:
+      - remotix-data:/data
+      - ./server/public:/app/public:ro   # binarios descargables (agente firmado)
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  caddy:
+    build:
+      context: .
+      dockerfile: infra/web.Dockerfile
+    container_name: remotix-caddy
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:?set DOMAIN in .env}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: remotix-turn
+    network_mode: host              # necesario para el relay de medios
+    command: >
+      -n --use-auth-secret
+      --static-auth-secret=${TURN_SECRET:?set TURN_SECRET in .env}
+      --realm=${DOMAIN:?set DOMAIN in .env}
+      --listening-port=3478
+      --min-port=49160 --max-port=49200
+      --fingerprint --no-multicast-peers --no-cli --no-tlsv1 --no-tlsv1_1
+    restart: unless-stopped
+
+volumes:
+  remotix-data:
+  caddy-data:
+  caddy-config:

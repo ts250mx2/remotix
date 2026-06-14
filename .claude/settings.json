@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Test-Path \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\"; \\(Get-ChildItem \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\" -Force -ErrorAction SilentlyContinue | Measure-Object\\).Count)",
+      "PowerShell(cmd /c dir \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\" /a)",
+      "PowerShell(Get-Command cargo, node, npm -ErrorAction SilentlyContinue)",
+      "PowerShell(try { \\(Get-Command cargo\\).Source } catch { \"cargo: NOT FOUND\" }; try { \\(Get-Command node\\).Source } catch { \"node: NOT FOUND\" }; try { \\(Get-Command npm\\).Source } catch { \"npm: NOT FOUND\" })",
+      "PowerShell(npm install --prefix \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\\\\signaling\" --no-audit --no-fund 2>&1)",
+      "PowerShell(npm install --prefix \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\\\\web\" --no-audit --no-fund 2>&1)",
+      "PowerShell(npm run typecheck --prefix \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\\\\signaling\" 2>&1)",
+      "PowerShell(npm run typecheck --prefix \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\\\\web\" 2>&1)",
+      "PowerShell(npm run build --prefix \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\\\\signaling\" 2>&1)",
+      "PowerShell(npm run build --prefix \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\\\\web\" 2>&1)",
+      "PowerShell(Rename-Item \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\\\\signaling\" \"server\")",
+      "PowerShell(cmd /c dir \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\" /b)",
+      "PowerShell(cmd /c dir \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\\\\server\" /b)",
+      "PowerShell(New-Item -ItemType Directory -Path \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\\\\server\\\\src\\\\db\" -Force)",
+      "PowerShell(New-Item -ItemType Directory -Path \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\\\\server\\\\src\\\\auth\" -Force)",
+      "PowerShell(New-Item -ItemType Directory -Path \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\\\\server\\\\src\\\\routes\" -Force)",
+      "PowerShell(New-Item -ItemType Directory -Path \"c:\\\\Users\\\\Ruben\\\\Documents\\\\Antigravity Projects\\\\remotix\\\\server\\\\src\\\\ws\" -Force)",
+      "PowerShell(\"subdirs ready\")"
+    ]
+  }
+}

@@ -1,0 +1,59 @@
+# Compila el agente nativo de Windows (release) y lo deja listo para descargar.
+#
+# Uso:
+#   infra\build-agent.ps1                                  # default → ws://localhost:8080
+#   infra\build-agent.ps1 -Server https://soporte.midominio.com   # baked para producción
+#   infra\build-agent.ps1 -Server https://... -Sign        # compila y firma (necesita certificado)
+#
+# Requiere el toolchain de Rust (https://rustup.rs) con el target MSVC.
+
+param(
+    [string]$Server = '',
+    [switch]$Sign
+)
+
+$ErrorActionPreference = 'Stop'
+$root = Split-Path $PSScriptRoot -Parent
+$agentDir = Join-Path $root 'agent'
+$publicDir = Join-Path $root 'server\public'
+
+# Localizar cargo (puede no estar en PATH si Rust se instaló en esta sesión).
+$cargo = (Get-Command cargo -ErrorAction SilentlyContinue).Source
+if (-not $cargo) {
+    $candidate = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
+    if (Test-Path $candidate) { $cargo = $candidate }
+}
+if (-not $cargo) {
+    Write-Host "No se encontró 'cargo'. Instala Rust desde https://rustup.rs y reintenta." -ForegroundColor Red
+    exit 1
+}
+
+if ($Server) {
+    Write-Host "Compilando con servidor baked: $Server" -ForegroundColor Cyan
+    $env:REMOTIX_DEFAULT_SERVER = $Server
+} else {
+    Write-Host "Compilando con servidor por defecto (ws://localhost:8080)." -ForegroundColor Yellow
+    Remove-Item Env:\REMOTIX_DEFAULT_SERVER -ErrorAction SilentlyContinue
+}
+
+Push-Location $agentDir
+& $cargo build --release
+Pop-Location
+
+# Dos binarios: el agente completo (chat) y la versión Lite (clave única, tipo TeamViewer).
+$bins = @(
+    @{ exe = 'remotix-agent.exe'; desc = 'agente completo (chat + control)' },
+    @{ exe = 'remotix-lite.exe';  desc = 'Lite (clave única, control + archivos)' }
+)
+New-Item -ItemType Directory -Force -Path $publicDir | Out-Null
+foreach ($b in $bins) {
+    $exe = Join-Path $agentDir "target\release\$($b.exe)"
+    if (-not (Test-Path $exe)) { Write-Host "No se generó: $exe" -ForegroundColor Red; exit 1 }
+    if ($Sign) { & (Join-Path $PSScriptRoot 'sign.ps1') -File $exe }
+    Copy-Item $exe (Join-Path $publicDir $b.exe) -Force
+    Write-Host "Listo: $publicDir\$($b.exe)  — $($b.desc)" -ForegroundColor Green
+}
+Write-Host "`nDescargas: /download/remotix-lite.exe (botón en /ayuda) y /download/remotix-agent.exe." -ForegroundColor Green
+if (-not $Sign) {
+    Write-Host "AVISO: sin firmar. Windows SmartScreen advertirá a los usuarios. Usa -Sign con tu certificado antes de producción." -ForegroundColor Yellow
+}

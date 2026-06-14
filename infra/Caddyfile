@@ -1,0 +1,40 @@
+# Reverse-proxy con HTTPS automático (Let's Encrypt) para Remotix.
+# Sirve la consola web (SPA estática) y hace proxy de la API y del WebSocket de
+# señalización al servidor Node. Caddy gestiona los certificados TLS solo;
+# requiere que el dominio apunte (DNS A) a este servidor y los puertos 80/443
+# abiertos.
+#
+# Variables (definidas en .env / entorno del contenedor caddy):
+#   DOMAIN      dominio público, ej: soporte.miempresa.com
+#   ACME_EMAIL  email para Let's Encrypt (avisos de expiración)
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# API REST + healthcheck → servidor Node.
+	@api path /api/* /health
+	handle @api {
+		reverse_proxy server:8080
+	}
+
+	# WebSocket de señalización (Caddy maneja el upgrade automáticamente).
+	handle /ws/* {
+		reverse_proxy server:8080
+	}
+
+	# Descarga del agente (lo sirve el server desde su carpeta public/).
+	handle /download/* {
+		reverse_proxy server:8080
+	}
+
+	# Resto → SPA estática con fallback a index.html (rutas de React Router).
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

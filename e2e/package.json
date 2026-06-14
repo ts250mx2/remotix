@@ -1,0 +1,1 @@
+{"name":"remotix-e2e","private":true,"type":"module","dependencies":{"playwright":"^1.60.0","werift":"^0.20.0","ws":"^8.18.0"}}

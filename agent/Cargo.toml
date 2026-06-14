@@ -1,0 +1,65 @@
+[package]
+name = "remotix-agent"
+version = "0.1.0"
+edition = "2021"
+description = "Remotix Windows agent — pantalla + control remoto vía WebRTC"
+license = "Proprietary"
+
+[lib]
+name = "remotix_agent"
+path = "src/lib.rs"
+
+[[bin]]
+name = "remotix-agent"
+path = "src/bin/remotix-agent.rs"
+
+[[bin]]
+name = "remotix-lite"
+path = "src/bin/remotix-lite.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-util = "0.3"
+bytes = "1"
+parking_lot = "0.12"
+
+# Signaling (WebSocket, soporta ws:// y wss:// vía schannel en Windows)
+tokio-tungstenite = { version = "0.24", features = ["connect", "native-tls"] }
+url = "2"
+
+# WebRTC P2P (video + datachannel de control)
+webrtc = "0.11"
+
+# Captura de pantalla (DXGI Desktop Duplication)
+scrap = "0.5"
+
+# Codificador H.264 (OpenH264, compilado desde fuente con cc + nasm)
+openh264 = "0.9"
+
+# Inyección de mouse/teclado
+enigo = "0.6"
+
+# Diálogo nativo de archivos (para enviar un archivo al técnico)
+rfd = "0.15"
+
+# GUI nativa (ventana de chat)
+eframe = "0.29"
+
+# Cliente HTTP para enrolar (POST /api/agent/join) y login
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+dirs = "5"
+
+# Arranque con Windows (clave Run del registro)
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
