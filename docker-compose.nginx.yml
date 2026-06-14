@@ -1,0 +1,13 @@
+# Override para desplegar detras de un Nginx propio (en vez del Caddy incluido).
+#
+# Tu Nginx hace de frontal TLS (80/443) y este override expone el server SOLO en
+# localhost para que Nginx haga proxy hacia el. coturn sigue en modo host.
+#
+# Uso (NO levantes Caddy: nombra solo server y coturn):
+#   docker compose -f docker-compose.yml -f docker-compose.nginx.yml up -d --build server coturn
+#
+# Ver guia completa en DEPLOY.md, seccion "Alternativa: detras de tu propio Nginx".
+services:
+  server:
+    ports:
+      - "127.0.0.1:8080:8080"

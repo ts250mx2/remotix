@@ -75,6 +75,38 @@ git pull
 docker compose up -d --build
 ```
 
+## Alternativa: detrás de tu propio Nginx (sin Caddy)
+
+Si el VPS ya tiene **Nginx** sirviendo otros sitios (ocupa 80/443), no uses el
+Caddy de este compose. Nginx hace de frontal TLS y el `server` corre solo en
+localhost; coturn sigue igual (modo host).
+
+1. **Compila la consola web** (sin instalar Node) y déjala donde Nginx la sirva:
+   ```bash
+   docker run --rm -v "$PWD/web":/web -w /web node:22-alpine sh -lc "npm ci || npm install; npm run build"
+   sudo mkdir -p /var/www/remotix && sudo cp -r web/dist/* /var/www/remotix/
+   ```
+2. **Levanta solo server + coturn** (exponiendo el server en localhost vía el override):
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.nginx.yml up -d --build server coturn
+   curl -s http://127.0.0.1:8080/health      # {"ok":true}
+   ```
+3. **Configura el sitio de Nginx** con la plantilla incluida (ajusta dominio y `root`):
+   ```bash
+   sudo cp infra/nginx-remotix.conf.example /etc/nginx/sites-available/remotix.hlsistemas.com
+   sudo ln -s /etc/nginx/sites-available/remotix.hlsistemas.com /etc/nginx/sites-enabled/
+   sudo nginx -t && sudo systemctl reload nginx
+   sudo certbot --nginx -d remotix.hlsistemas.com    # TLS 443 + redirect 80->443
+   ```
+4. **Firewall:** con Nginx ya tienes 80/443; abre solo el TURN:
+   ```bash
+   sudo ufw allow 3478 && sudo ufw allow 49160:49200/udp
+   ```
+
+Notas: entra siempre por `https://` (la cookie de sesión es `Secure`). **No** corras
+`docker compose up -d` a secas en este modo: levantaría también Caddy y chocaría con
+Nginx en 80/443 — nombra siempre `server coturn`. Al actualizar la web, repite el paso 1.
+
 ## Troubleshooting
 - **No saca certificado:** revisa que el DNS apunte al VPS y que 80/443 estén abiertos. `docker compose logs caddy`.
 - **El control remoto / vídeo no conecta entre redes distintas:** suele ser el relay TURN. Verifica los puertos UDP. Si el VPS está detrás de NAT 1:1, añade al comando de `coturn` en `docker-compose.yml`: `--external-ip=<IP_PUBLICA>`.
