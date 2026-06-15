@@ -124,6 +124,30 @@ impl Account {
         Ok(resp.json::<R>().await?.code)
     }
 
+    /// Conecta por la clave fija de un equipo (modo ad-hoc). Equipos sin dueño se
+    /// aceptan solo con la clave; los que tienen dueño exigen acceso. Devuelve
+    /// (código de señalización, nombre del equipo).
+    pub async fn connect_by_key(&self, access_key: &str) -> Result<(String, String)> {
+        let url = format!("{}/api/device/connect", self.base);
+        let mut req = self.http.post(&url).json(&serde_json::json!({ "accessKey": access_key }));
+        if let Some(c) = self.cookie() { req = req.header(reqwest::header::COOKIE, c); }
+        let resp = req.send().await?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                401 => anyhow!("inicia sesión para conectarte"),
+                403 => anyhow!("no tienes acceso a ese equipo"),
+                404 => anyhow!("clave no encontrada"),
+                409 => anyhow!("el equipo no está en línea"),
+                _ => anyhow!("no se pudo conectar ({})", status.as_u16()),
+            });
+        }
+        #[derive(Deserialize)]
+        struct R { code: String, #[serde(default)] name: String }
+        let r: R = resp.json().await?;
+        Ok((r.code, r.name))
+    }
+
     pub async fn logout(&mut self) -> Result<()> {
         let url = format!("{}/api/auth/logout", self.base);
         let mut req = self.http.post(&url);

@@ -135,6 +135,7 @@ fn main() -> Result<()> {
         autostart: autostart::is_autostart(),
         email: email0,
         password: String::new(),
+        key_input: String::new(),
         viewer: None,
         last_refresh: Instant::now(),
         server,
@@ -178,6 +179,7 @@ enum Action {
     Login,
     Logout,
     Connect(DeviceInfo),
+    ConnectByKey(String),
     ToggleAutostart(bool),
 }
 
@@ -191,6 +193,7 @@ struct RemotixApp {
     autostart: bool,
     email: String,
     password: String,
+    key_input: String,
     viewer: Option<ActiveViewer>,
     last_refresh: Instant,
     server: String,
@@ -249,33 +252,57 @@ impl RemotixApp {
         });
     }
 
+    // Conectar a un equipo de la libreta (por id, con acceso).
     fn do_connect(&self, dev: DeviceInfo) {
         let account = self.account.clone();
         let ui = self.ui.clone();
         let server = self.server.clone();
         self.rt.spawn(async move {
             let acc = account.lock().await;
-            match acc.connect(&dev.id).await {
-                Ok(code) => {
-                    drop(acc);
-                    let (shared, input_tx, input_rx) = viewer::new_session();
-                    let http = to_http(&server);
-                    let ws = to_ws(&server, "/ws/signal");
-                    let shared2 = shared.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = viewer::run_viewer_session(&http, &ws, &code, shared2, input_rx).await {
-                            warn!("visor: {e:#}");
-                        }
-                    });
-                    *ui.pending_viewer.lock() = Some(ActiveViewer {
-                        shared, input_tx, name: dev.name.clone(), tex: None, size: [0, 0],
-                        prev_mods: egui::Modifiers::default(),
-                    });
+            let res = acc.connect(&dev.id).await;
+            drop(acc);
+            match res {
+                Ok(code) => spawn_viewer(&ui, &server, code, dev.name.clone()),
+                Err(e) => { *ui.error.lock() = Some(e.to_string()); }
+            }
+        });
+    }
+
+    // Conectar por clave (ad-hoc): equipos sin dueño se aceptan solo con la clave.
+    fn do_connect_by_key(&self, key: String) {
+        let account = self.account.clone();
+        let ui = self.ui.clone();
+        let server = self.server.clone();
+        self.rt.spawn(async move {
+            let acc = account.lock().await;
+            let res = acc.connect_by_key(&key).await;
+            drop(acc);
+            match res {
+                Ok((code, name)) => {
+                    let label = if name.is_empty() { format!("clave {key}") } else { name };
+                    spawn_viewer(&ui, &server, code, label);
                 }
                 Err(e) => { *ui.error.lock() = Some(e.to_string()); }
             }
         });
     }
+}
+
+/// Lanza una sesión de visor (corre dentro del runtime tokio) y la deja lista para
+/// que la GUI abra su ventana.
+fn spawn_viewer(ui: &Arc<UiShared>, server: &str, code: String, name: String) {
+    let (shared, input_tx, input_rx) = viewer::new_session();
+    let http = to_http(server);
+    let ws = to_ws(server, "/ws/signal");
+    let shared2 = shared.clone();
+    tokio::spawn(async move {
+        if let Err(e) = viewer::run_viewer_session(&http, &ws, &code, shared2, input_rx).await {
+            warn!("visor: {e:#}");
+        }
+    });
+    *ui.pending_viewer.lock() = Some(ActiveViewer {
+        shared, input_tx, name, tex: None, size: [0, 0], prev_mods: egui::Modifiers::default(),
+    });
 }
 
 impl eframe::App for RemotixApp {
@@ -343,7 +370,22 @@ impl eframe::App for RemotixApp {
             ui.add_space(12.0);
 
             if let Some(_u) = &user {
-                // --- Rol operador: libreta de PCs ---
+                // --- Rol operador ---
+                // Conectar por clave (ad-hoc): cualquier equipo en línea sin dueño,
+                // o uno de tu libreta. Requiere estar logueado.
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Conectar por clave").strong());
+                    ui.horizontal(|ui| {
+                        let resp = ui.add(egui::TextEdit::singleline(&mut self.key_input)
+                            .hint_text("XXX-XXX-XXX").desired_width(150.0));
+                        let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        if (ui.button("Conectar").clicked() || enter) && !self.key_input.trim().is_empty() {
+                            action = Some(Action::ConnectByKey(self.key_input.trim().to_string()));
+                        }
+                    });
+                });
+                ui.add_space(10.0);
+
                 ui.heading("Mis PCs");
                 ui.label(egui::RichText::new("Equipos a los que tienes acceso.").small().weak());
                 ui.add_space(6.0);
@@ -390,6 +432,7 @@ impl eframe::App for RemotixApp {
             Some(Action::Login) => self.do_login(),
             Some(Action::Logout) => self.do_logout(),
             Some(Action::Connect(d)) => self.do_connect(d),
+            Some(Action::ConnectByKey(k)) => { self.key_input.clear(); self.do_connect_by_key(k); }
             Some(Action::ToggleAutostart(v)) => { let _ = autostart::set_autostart(v); }
             None => {}
         }

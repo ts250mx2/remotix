@@ -35,16 +35,19 @@ export const deviceRoutes = new Hono()
     return c.json({ deviceId: id, accessKey, secret, name }, 201);
   })
 
-  // Conectarse por la clave fija (consola del operador). Requiere usuario logueado
-  // CON acceso al device (dueño, grant directo o grupo). Si está en línea, reserva
-  // una sala y le ordena compartir; devolvemos el código para la consola.
+  // Conectarse por la clave fija (consola del operador). Requiere usuario logueado.
+  //   - Equipo CON dueño  → exige acceso (dueño, grant directo o grupo).
+  //   - Equipo SIN dueño  → cualquier operador logueado puede conectar por la clave
+  //     (modo ad-hoc tipo TeamViewer); queda registro de quién conecta.
   .post('/connect', requireUser, zValidator('json', connectSchema), async (c) => {
     const user = c.get('user');
     const key = normalizeKey(c.req.valid('json').accessKey);
     const dev = (await db.select().from(tables.devices).where(eq(tables.devices.accessKey, key)))[0];
     if (!dev) return c.json({ error: 'not_found' }, 404);
-    const role = await userCanAccessDevice(user.id, dev.id);
-    if (!role) return c.json({ error: 'forbidden' }, 403);
+    if (dev.ownerId) {
+      const role = await userCanAccessDevice(user.id, dev.id);
+      if (!role) return c.json({ error: 'forbidden' }, 403);
+    }
     if (!deviceHub.isOnline(dev.id)) return c.json({ error: 'offline' }, 409);
     const code = reserveRemoteSession({ name: dev.name });
     deviceHub.sendToDevice(dev.id, { type: 'start', code });
