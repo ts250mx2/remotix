@@ -15,6 +15,7 @@ use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264};
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
+use webrtc::ice_transport::ice_credential_type::RTCIceCredentialType;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
@@ -245,7 +246,7 @@ async fn build_peer(
         urls: s.urls.clone().into_vec(),
         username: s.username.clone().unwrap_or_default(),
         credential: s.credential.clone().unwrap_or_default(),
-        ..Default::default()
+        credential_type: RTCIceCredentialType::Password,
     }).collect();
 
     let pc = Arc::new(api.new_peer_connection(RTCConfiguration { ice_servers: servers, ..Default::default() }).await?);
