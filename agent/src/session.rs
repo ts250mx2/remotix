@@ -2,10 +2,12 @@
 //! (reservado por el técnico desde el chat), comparte pantalla por WebRTC y
 //! recibe input. Termina cuando el técnico se desconecta.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
+use parking_lot::Mutex;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{error, info, warn};
@@ -42,8 +44,10 @@ pub enum LiteEvent {
 /// la clave), la reporta a la GUI, comparte pantalla + control + archivos, y
 /// sigue activa entre conexiones (la clave no cambia hasta cerrar).
 pub async fn run_lite_session(signal_ws_url: &str, name: &str, ui: std::sync::mpsc::Sender<LiteEvent>) -> Result<()> {
-    let (screen_w, screen_h) = capture::primary_dims().context("no se pudo leer el monitor")?;
-    let input_tx = input::spawn_injector(screen_w, screen_h);
+    let selected = Arc::new(AtomicUsize::new(0));
+    let (iw, ih) = capture::monitor_dims(0).unwrap_or((1920, 1080));
+    let monitor_rect: input::MonitorRect = Arc::new(Mutex::new(crate::monitors::rect_for(0, iw, ih)));
+    let input_tx = input::spawn_injector(monitor_rect.clone());
 
     let (ws_stream, _) = tokio_tungstenite::connect_async(signal_ws_url).await
         .context("no se pudo conectar al servidor")?;
@@ -81,7 +85,7 @@ pub async fn run_lite_session(signal_ws_url: &str, name: &str, ui: std::sync::mp
                     }
                     Incoming::PeerJoined => {
                         let _ = ui.send(LiteEvent::Status("Técnico conectándose…".into()));
-                        match build_peer(&ice_servers, &out_tx, &state_tx, &input_tx).await {
+                        match build_peer(&ice_servers, &out_tx, &state_tx, &input_tx, selected.clone(), monitor_rect.clone()).await {
                             Ok((new_pc, new_track, dc)) => {
                                 if let Ok(offer) = new_pc.create_offer(None).await {
                                     if new_pc.set_local_description(offer.clone()).await.is_ok() {
@@ -110,7 +114,7 @@ pub async fn run_lite_session(signal_ws_url: &str, name: &str, ui: std::sync::mp
                 match state {
                     RTCPeerConnectionState::Connected => {
                         if capture_handle.is_none() {
-                            if let Some(t) = track.clone() { capture_handle = Some(capture::start(t, TARGET_FPS)); }
+                            if let Some(t) = track.clone() { capture_handle = Some(capture::start(t, TARGET_FPS, selected.clone())); }
                         }
                         let _ = ui.send(LiteEvent::Status("Conectado · compartiendo tu pantalla".into()));
                     }
@@ -132,8 +136,10 @@ pub async fn run_lite_session(signal_ws_url: &str, name: &str, ui: std::sync::mp
 /// Hospeda una sesión de control con `code` y comparte pantalla hasta que el
 /// técnico se desconecta (peer-left) o se cierra la conexión.
 pub async fn run_remote_session(signal_ws_url: &str, name: &str, code: &str) -> Result<()> {
-    let (screen_w, screen_h) = capture::primary_dims().context("no se pudo leer el monitor")?;
-    let input_tx = input::spawn_injector(screen_w, screen_h);
+    let selected = Arc::new(AtomicUsize::new(0));
+    let (iw, ih) = capture::monitor_dims(0).unwrap_or((1920, 1080));
+    let monitor_rect: input::MonitorRect = Arc::new(Mutex::new(crate::monitors::rect_for(0, iw, ih)));
+    let input_tx = input::spawn_injector(monitor_rect.clone());
 
     let (ws_stream, _) = tokio_tungstenite::connect_async(signal_ws_url)
         .await
@@ -177,7 +183,7 @@ pub async fn run_remote_session(signal_ws_url: &str, name: &str, code: &str) -> 
                 match incoming {
                     Incoming::Hosted { ice_servers: ice, .. } => { ice_servers = ice; }
                     Incoming::PeerJoined => {
-                        match build_peer(&ice_servers, &out_tx, &state_tx, &input_tx).await {
+                        match build_peer(&ice_servers, &out_tx, &state_tx, &input_tx, selected.clone(), monitor_rect.clone()).await {
                             Ok((new_pc, new_track, dc)) => {
                                 if let Ok(offer) = new_pc.create_offer(None).await {
                                     if new_pc.set_local_description(offer.clone()).await.is_ok() {
@@ -200,7 +206,7 @@ pub async fn run_remote_session(signal_ws_url: &str, name: &str, code: &str) -> 
                 match state {
                     RTCPeerConnectionState::Connected => {
                         if capture_handle.is_none() {
-                            if let Some(t) = track.clone() { capture_handle = Some(capture::start(t, TARGET_FPS)); }
+                            if let Some(t) = track.clone() { capture_handle = Some(capture::start(t, TARGET_FPS, selected.clone())); }
                         }
                     }
                     RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed => break,
@@ -235,6 +241,8 @@ async fn build_peer(
     out_tx: &mpsc::UnboundedSender<String>,
     state_tx: &mpsc::UnboundedSender<RTCPeerConnectionState>,
     input_tx: &std::sync::mpsc::Sender<InputEvent>,
+    selected: Arc<AtomicUsize>,
+    monitor_rect: input::MonitorRect,
 ) -> Result<(Arc<RTCPeerConnection>, Arc<TrackLocalStaticSample>, Arc<webrtc::data_channel::RTCDataChannel>)> {
     let mut m = MediaEngine::default();
     m.register_default_codecs()?;
@@ -272,6 +280,40 @@ async fn build_peer(
 
     let files_dc = pc.create_data_channel("files", None).await?;
     crate::files::wire_files_channel(files_dc);
+
+    // Canal "meta": informa los monitores al operador y recibe la selección.
+    let meta_dc = pc.create_data_channel("meta", None).await?;
+    {
+        let dc_open = meta_dc.clone();
+        meta_dc.on_open(Box::new(move || {
+            let dc = dc_open.clone();
+            Box::pin(async move {
+                let n = crate::capture::monitor_count();
+                let msg = serde_json::json!({ "monitors": n, "active": 0 }).to_string();
+                let _ = dc.send_text(msg).await;
+            })
+        }));
+        let sel = selected.clone();
+        let rect = monitor_rect.clone();
+        meta_dc.on_message(Box::new(move |msg: DataChannelMessage| {
+            let sel = sel.clone();
+            let rect = rect.clone();
+            Box::pin(async move {
+                if !msg.is_string {
+                    return;
+                }
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&msg.data) {
+                    if let Some(idx) = v.get("select").and_then(|x| x.as_u64()) {
+                        let idx = idx as usize;
+                        sel.store(idx, Ordering::SeqCst);
+                        if let Some((w, h)) = crate::capture::monitor_dims(idx) {
+                            *rect.lock() = crate::monitors::rect_for(idx, w, h);
+                        }
+                    }
+                }
+            })
+        }));
+    }
 
     {
         let out = out_tx.clone();

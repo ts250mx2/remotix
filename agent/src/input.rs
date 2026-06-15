@@ -3,12 +3,17 @@
 //! hilo dedicado que posee el `Enigo` (evita problemas de Send/Sync).
 
 use std::sync::mpsc::{channel, Sender};
+use std::sync::Arc;
 
 use enigo::{
     Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings,
 };
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
+
+/// Rect del monitor activo: (left, top, width, height) en el escritorio virtual.
+pub type MonitorRect = Arc<Mutex<(i32, i32, i32, i32)>>;
 
 // `Serialize` además de `Deserialize` para que el rol operador (visor nativo)
 // emita exactamente el mismo formato que consume el host.
@@ -28,9 +33,9 @@ pub enum InputEvent {
 }
 
 /// Lanza el hilo de inyección y devuelve el canal por el que enviarle eventos.
-/// `width`/`height` son las dimensiones de la pantalla capturada (para mapear
-/// coordenadas normalizadas 0..1 a píxeles).
-pub fn spawn_injector(width: i32, height: i32) -> Sender<InputEvent> {
+/// `rect` es el rect (left, top, width, height) del monitor que se está viendo;
+/// se actualiza al cambiar de monitor para mapear las coords 0..1 a su región.
+pub fn spawn_injector(rect: MonitorRect) -> Sender<InputEvent> {
     let (tx, rx) = channel::<InputEvent>();
     std::thread::Builder::new()
         .name("input-injector".into())
@@ -43,7 +48,8 @@ pub fn spawn_injector(width: i32, height: i32) -> Sender<InputEvent> {
                 }
             };
             while let Ok(evt) = rx.recv() {
-                if let Err(e) = inject(&mut enigo, &evt, width, height) {
+                let (l, t, w, h) = *rect.lock();
+                if let Err(e) = inject(&mut enigo, &evt, l, t, w, h) {
                     warn!("fallo inyectando {evt:?}: {e}");
                 }
             }
@@ -52,21 +58,21 @@ pub fn spawn_injector(width: i32, height: i32) -> Sender<InputEvent> {
     tx
 }
 
-fn to_px(v: f64, max: i32) -> i32 {
-    (v.clamp(0.0, 1.0) * max as f64).round() as i32
+fn to_px(v: f64, off: i32, span: i32) -> i32 {
+    off + (v.clamp(0.0, 1.0) * span as f64).round() as i32
 }
 
-fn inject(enigo: &mut Enigo, evt: &InputEvent, w: i32, h: i32) -> enigo::InputResult<()> {
+fn inject(enigo: &mut Enigo, evt: &InputEvent, l: i32, t: i32, w: i32, h: i32) -> enigo::InputResult<()> {
     match evt {
         InputEvent::Move { x, y } => {
-            enigo.move_mouse(to_px(*x, w), to_px(*y, h), Coordinate::Abs)
+            enigo.move_mouse(to_px(*x, l, w), to_px(*y, t, h), Coordinate::Abs)
         }
         InputEvent::Down { x, y, button } => {
-            enigo.move_mouse(to_px(*x, w), to_px(*y, h), Coordinate::Abs)?;
+            enigo.move_mouse(to_px(*x, l, w), to_px(*y, t, h), Coordinate::Abs)?;
             enigo.button(map_button(*button), Direction::Press)
         }
         InputEvent::Up { x, y, button } => {
-            enigo.move_mouse(to_px(*x, w), to_px(*y, h), Coordinate::Abs)?;
+            enigo.move_mouse(to_px(*x, l, w), to_px(*y, t, h), Coordinate::Abs)?;
             enigo.button(map_button(*button), Direction::Release)
         }
         InputEvent::Wheel { dy, dx, .. } => {

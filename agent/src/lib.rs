@@ -10,6 +10,7 @@ pub mod device;
 pub mod encode;
 pub mod files;
 pub mod input;
+pub mod monitors;
 pub mod proto;
 pub mod session;
 pub mod ui;

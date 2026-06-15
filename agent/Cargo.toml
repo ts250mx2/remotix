@@ -62,9 +62,10 @@ tray-icon = "0.19"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 dirs = "5"
 
-# Arranque con Windows (clave Run del registro)
+# Arranque con Windows (clave Run del registro) + enumeración de monitores
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi"] }
 
 [profile.release]
 lto = true

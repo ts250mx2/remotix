@@ -8,7 +8,7 @@
 //!   vídeo H.264 entrante (on_track) → depaquetizar RTP → decode → RGBA → GUI
 //!   input local → JSON InputEvent → DataChannel `control` (lo inyecta el host)
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -24,6 +24,7 @@ use tracing::{error, warn};
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
+use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
 use webrtc::ice_transport::ice_credential_type::RTCIceCredentialType;
@@ -61,6 +62,10 @@ pub struct ViewerShared {
     pub closed: AtomicBool,
     /// Canal de archivos (lo crea el host); la GUI lo usa para enviar/pedir.
     pub files_dc: Mutex<Option<Arc<RTCDataChannel>>>,
+    /// Multimonitor: nº de monitores del host, monitor activo y canal de control.
+    pub monitors: AtomicUsize,
+    pub active_monitor: AtomicUsize,
+    pub meta_dc: Mutex<Option<Arc<RTCDataChannel>>>,
 }
 
 impl ViewerShared {
@@ -239,6 +244,25 @@ async fn build_viewer_peer(
                     "files" => {
                         *shared.files_dc.lock() = Some(dc.clone());
                         crate::files::wire_files_channel(dc);
+                    }
+                    "meta" => {
+                        *shared.meta_dc.lock() = Some(dc.clone());
+                        let sh = shared.clone();
+                        dc.on_message(Box::new(move |msg: DataChannelMessage| {
+                            let sh = sh.clone();
+                            Box::pin(async move {
+                                if msg.is_string {
+                                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&msg.data) {
+                                        if let Some(n) = v.get("monitors").and_then(|x| x.as_u64()) {
+                                            sh.monitors.store(n as usize, Ordering::SeqCst);
+                                        }
+                                        if let Some(a) = v.get("active").and_then(|x| x.as_u64()) {
+                                            sh.active_monitor.store(a as usize, Ordering::SeqCst);
+                                        }
+                                    }
+                                }
+                            })
+                        }));
                     }
                     _ => {}
                 }

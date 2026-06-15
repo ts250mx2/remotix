@@ -364,6 +364,27 @@ fn file_buttons(ui: &mut egui::Ui, av: &ActiveViewer, rt: &tokio::runtime::Handl
     }
 }
 
+/// Selector de monitor (solo si el host tiene más de uno).
+fn monitor_buttons(ui: &mut egui::Ui, av: &ActiveViewer, rt: &tokio::runtime::Handle) {
+    let n = av.shared.monitors.load(Ordering::SeqCst);
+    if n <= 1 {
+        return;
+    }
+    let active = av.shared.active_monitor.load(Ordering::SeqCst);
+    ui.label("Monitor:");
+    for i in 0..n {
+        if ui.selectable_label(i == active, format!("{}", i + 1)).clicked() {
+            av.shared.active_monitor.store(i, Ordering::SeqCst);
+            let meta = av.shared.meta_dc.lock().clone();
+            if let Some(dc) = meta {
+                let msg = format!("{{\"select\":{i}}}");
+                rt.spawn(async move { let _ = dc.send_text(msg).await; });
+            }
+        }
+    }
+    ui.separator();
+}
+
 impl eframe::App for RemotixApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Eventos del rol host.
@@ -564,6 +585,7 @@ impl eframe::App for RemotixApp {
                                             vctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                                         }
                                         ui.separator();
+                                        monitor_buttons(ui, av, &rt);
                                         file_buttons(ui, av, &rt);
                                     });
                                 });
@@ -579,6 +601,7 @@ impl eframe::App for RemotixApp {
                                         vctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
                                     }
                                     file_buttons(ui, av, &rt);
+                                    monitor_buttons(ui, av, &rt);
                                 });
                             });
                             ui.add_space(2.0);
