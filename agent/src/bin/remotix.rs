@@ -17,11 +17,14 @@ use eframe::egui;
 use parking_lot::Mutex;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::warn;
+use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem};
+use tray_icon::{TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use remotix_agent::account::{Account, DeviceInfo, UserInfo};
 use remotix_agent::autostart;
 use remotix_agent::config::{to_http, to_ws, LiteConfig};
 use remotix_agent::device::run_lite_unattended;
+use remotix_agent::files;
 use remotix_agent::input::InputEvent;
 use remotix_agent::session::LiteEvent;
 use remotix_agent::viewer::{self, ViewerShared};
@@ -40,6 +43,38 @@ fn resolve_server() -> String {
 
 fn format_key(k: &str) -> String {
     k.chars().collect::<Vec<_>>().chunks(3).map(|c| c.iter().collect::<String>()).collect::<Vec<_>>().join("-")
+}
+
+/// Icono en la bandeja del sistema + ids de su menú.
+struct TrayState {
+    _tray: TrayIcon,
+    show_id: MenuId,
+    quit_id: MenuId,
+}
+
+fn make_tray_icon() -> Option<tray_icon::Icon> {
+    let (w, h) = (32u32, 32u32);
+    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+    for _ in 0..(w * h) {
+        rgba.extend_from_slice(&[32, 118, 209, 255]); // azul Remotix
+    }
+    tray_icon::Icon::from_rgba(rgba, w, h).ok()
+}
+
+fn create_tray() -> Option<TrayState> {
+    let menu = Menu::new();
+    let show = MenuItem::new("Abrir Remotix", true, None);
+    let quit = MenuItem::new("Salir", true, None);
+    menu.append(&show).ok()?;
+    menu.append(&quit).ok()?;
+    let show_id = show.id().clone();
+    let quit_id = quit.id().clone();
+    let mut builder = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip("Remotix");
+    if let Some(icon) = make_tray_icon() {
+        builder = builder.with_icon(icon);
+    }
+    let tray = builder.build().ok()?;
+    Some(TrayState { _tray: tray, show_id, quit_id })
 }
 
 /// Modo headless: corre solo el visor contra un código y reporta si llegan frames
@@ -139,6 +174,9 @@ fn main() -> Result<()> {
         viewer: None,
         last_refresh: Instant::now(),
         server,
+        tray: None,
+        tray_tried: false,
+        want_quit: false,
     };
 
     let options = eframe::NativeOptions {
@@ -197,6 +235,9 @@ struct RemotixApp {
     viewer: Option<ActiveViewer>,
     last_refresh: Instant,
     server: String,
+    tray: Option<TrayState>,
+    tray_tried: bool,
+    want_quit: bool,
 }
 
 impl RemotixApp {
@@ -315,6 +356,37 @@ impl eframe::App for RemotixApp {
             }
         }
 
+        // Bandeja del sistema: crear (una vez) y atender sus eventos.
+        if !self.tray_tried {
+            self.tray = create_tray();
+            self.tray_tried = true;
+        }
+        if let Some(tray) = &self.tray {
+            let mut show = false;
+            while let Ok(ev) = MenuEvent::receiver().try_recv() {
+                if ev.id == tray.show_id {
+                    show = true;
+                } else if ev.id == tray.quit_id {
+                    self.want_quit = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+            while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
+                if matches!(ev, TrayIconEvent::DoubleClick { .. }) {
+                    show = true;
+                }
+            }
+            if show {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+        }
+        // Cerrar la ventana principal = minimizar a la bandeja (no salir), salvo "Salir".
+        if ctx.input(|i| i.viewport().close_requested()) && !self.want_quit && self.tray.is_some() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
+
         // Recoge una sesión de visor recién creada por la tarea async.
         if let Some(av) = self.ui.pending_viewer.lock().take() {
             self.viewer = Some(av);
@@ -369,23 +441,23 @@ impl eframe::App for RemotixApp {
 
             ui.add_space(12.0);
 
-            if let Some(_u) = &user {
-                // --- Rol operador ---
-                // Conectar por clave (ad-hoc): cualquier equipo en línea sin dueño,
-                // o uno de tu libreta. Requiere estar logueado.
-                ui.group(|ui| {
-                    ui.label(egui::RichText::new("Conectar por clave").strong());
-                    ui.horizontal(|ui| {
-                        let resp = ui.add(egui::TextEdit::singleline(&mut self.key_input)
-                            .hint_text("XXX-XXX-XXX").desired_width(150.0));
-                        let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        if (ui.button("Conectar").clicked() || enter) && !self.key_input.trim().is_empty() {
-                            action = Some(Action::ConnectByKey(self.key_input.trim().to_string()));
-                        }
-                    });
+            // Conectar por clave — SIEMPRE disponible (con o sin login). Equipos sin
+            // dueño se conectan solo con la clave; los que tienen dueño exigen login.
+            ui.group(|ui| {
+                ui.label(egui::RichText::new("Conectar a otra PC por su clave").strong());
+                ui.horizontal(|ui| {
+                    let resp = ui.add(egui::TextEdit::singleline(&mut self.key_input)
+                        .hint_text("XXX-XXX-XXX").desired_width(150.0));
+                    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if (ui.button("Conectar").clicked() || enter) && !self.key_input.trim().is_empty() {
+                        action = Some(Action::ConnectByKey(self.key_input.trim().to_string()));
+                    }
                 });
-                ui.add_space(10.0);
+            });
+            ui.add_space(12.0);
 
+            if let Some(_u) = &user {
+                // --- Libreta de PCs (con sesión) ---
                 ui.heading("Mis PCs");
                 ui.label(egui::RichText::new("Equipos a los que tienes acceso.").small().weak());
                 ui.add_space(6.0);
@@ -439,6 +511,7 @@ impl eframe::App for RemotixApp {
 
         // --- Ventana del visor nativo (si hay sesión activa) ---
         let mut close_viewer = false;
+        let rt = self.rt.clone();
         if let Some(av) = self.viewer.as_mut() {
             if av.shared.closed.load(Ordering::SeqCst) {
                 close_viewer = true;
@@ -450,7 +523,23 @@ impl eframe::App for RemotixApp {
                 ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("remotix-viewer"), builder, |vctx, _class| {
                     egui::TopBottomPanel::top("vstat").show(vctx, |ui| {
                         ui.add_space(2.0);
-                        ui.label(egui::RichText::new(av.shared.status.lock().clone()).weak());
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(av.shared.status.lock().clone()).weak());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let files_dc = av.shared.files_dc.lock().clone();
+                                let on = files_dc.is_some();
+                                if ui.add_enabled(on, egui::Button::new("📥 Pedir archivo")).clicked() {
+                                    if let Some(dc) = files_dc.clone() {
+                                        rt.spawn(async move { files::request_file(dc).await; });
+                                    }
+                                }
+                                if ui.add_enabled(on, egui::Button::new("📤 Enviar archivo")).clicked() {
+                                    if let Some(dc) = files_dc {
+                                        rt.spawn(async move { files::pick_and_send(dc); });
+                                    }
+                                }
+                            });
+                        });
                         ui.add_space(2.0);
                     });
                     egui::CentralPanel::default().show(vctx, |ui| {

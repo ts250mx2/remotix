@@ -59,6 +59,8 @@ pub struct ViewerShared {
     pub frame: Mutex<Option<DecodedFrame>>,
     pub status: Mutex<String>,
     pub closed: AtomicBool,
+    /// Canal de archivos (lo crea el host); la GUI lo usa para enviar/pedir.
+    pub files_dc: Mutex<Option<Arc<RTCDataChannel>>>,
 }
 
 impl ViewerShared {
@@ -186,6 +188,7 @@ async fn build_viewer_peer(
     state_tx: &mpsc::UnboundedSender<RTCPeerConnectionState>,
     au_tx: std::sync::mpsc::Sender<Vec<u8>>,
     control_slot: ControlSlot,
+    shared: Arc<ViewerShared>,
 ) -> Result<Arc<RTCPeerConnection>> {
     let mut m = MediaEngine::default();
     m.register_default_codecs()?;
@@ -226,12 +229,17 @@ async fn build_viewer_peer(
     // DataChannels creados por el host (el operador NO los crea, los recibe).
     {
         let slot = control_slot.clone();
+        let shared = shared.clone();
         pc.on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
             let slot = slot.clone();
+            let shared = shared.clone();
             Box::pin(async move {
                 match dc.label() {
                     "control" => { *slot.lock() = Some(dc); }
-                    "files" => { crate::files::wire_files_channel(dc); }
+                    "files" => {
+                        *shared.files_dc.lock() = Some(dc.clone());
+                        crate::files::wire_files_channel(dc);
+                    }
                     _ => {}
                 }
             })
@@ -354,7 +362,7 @@ pub async fn run_viewer_session(
     send(&out_tx, &Outgoing::Join { code: code.to_string() });
     shared.set_status("Conectando…");
 
-    let pc = build_viewer_peer(&ice_servers, &out_tx, &state_tx, au_tx, control_slot.clone()).await?;
+    let pc = build_viewer_peer(&ice_servers, &out_tx, &state_tx, au_tx, control_slot.clone(), shared.clone()).await?;
     let mut remote_set = false;
     let mut pending: Vec<RTCIceCandidateInit> = Vec::new();
 

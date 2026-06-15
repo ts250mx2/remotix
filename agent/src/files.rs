@@ -62,7 +62,7 @@ pub fn wire_files_channel(dc: Arc<RTCDataChannel>) {
                     match ctrl.f.as_str() {
                         "begin" => start_incoming(&incoming, ctrl),
                         "end" => finish_incoming(&incoming),
-                        "req" => handle_request(dc),
+                        "req" => pick_and_send(dc),
                         _ => {}
                     }
                 }
@@ -130,12 +130,13 @@ fn finish_incoming(incoming: &Arc<Mutex<Option<Incoming>>>) {
     }
 }
 
-/// El operador pidió un archivo: abrimos un diálogo nativo y enviamos el elegido.
-fn handle_request(dc: Arc<RTCDataChannel>) {
+/// Abre un diálogo nativo y envía el archivo elegido por el canal. Lo usa tanto el
+/// host al recibir "req" como el operador desde el botón "Enviar archivo".
+pub fn pick_and_send(dc: Arc<RTCDataChannel>) {
     let handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
         let picked = rfd::FileDialog::new()
-            .set_title("Remotix: elige un archivo para enviar al técnico")
+            .set_title("Remotix: elige un archivo para enviar")
             .pick_file();
         let Some(path) = picked else {
             info!("envío de archivo cancelado por el usuario");
@@ -152,6 +153,11 @@ fn handle_request(dc: Arc<RTCDataChannel>) {
             Err(e) => warn!("no se pudo leer {}: {e}", path.display()),
         }
     });
+}
+
+/// Pide al otro lado que elija y envíe un archivo (el otro abre su diálogo).
+pub async fn request_file(dc: Arc<RTCDataChannel>) {
+    let _ = dc.send_text("{\"f\":\"req\"}".to_string()).await;
 }
 
 async fn send_file(dc: Arc<RTCDataChannel>, name: String, data: Vec<u8>) {

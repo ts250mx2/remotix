@@ -2,10 +2,11 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
+import { getCookie } from 'hono/cookie';
 import { db, tables } from '../db/index.js';
 import { newId, newAccessKey, newAgentSecret } from '../ids.js';
 import { hashSecret } from '../auth/password.js';
-import { requireUser } from '../auth/middleware.js';
+import { getSession, COOKIE_NAME } from '../auth/session.js';
 import { userCanAccessDevice } from '../access.js';
 import { deviceHub } from '../devices/hub.js';
 import { reserveRemoteSession } from '../ws/signaling.js';
@@ -35,17 +36,18 @@ export const deviceRoutes = new Hono()
     return c.json({ deviceId: id, accessKey, secret, name }, 201);
   })
 
-  // Conectarse por la clave fija (consola del operador). Requiere usuario logueado.
-  //   - Equipo CON dueño  → exige acceso (dueño, grant directo o grupo).
-  //   - Equipo SIN dueño  → cualquier operador logueado puede conectar por la clave
-  //     (modo ad-hoc tipo TeamViewer); queda registro de quién conecta.
-  .post('/connect', requireUser, zValidator('json', connectSchema), async (c) => {
-    const user = c.get('user');
+  // Conectarse por la clave fija (consola del operador), estilo TeamViewer:
+  //   - Equipo SIN dueño → solo con la clave, SIN necesidad de login.
+  //   - Equipo CON dueño → requiere usuario logueado con acceso (dueño/grant/grupo).
+  .post('/connect', zValidator('json', connectSchema), async (c) => {
     const key = normalizeKey(c.req.valid('json').accessKey);
     const dev = (await db.select().from(tables.devices).where(eq(tables.devices.accessKey, key)))[0];
     if (!dev) return c.json({ error: 'not_found' }, 404);
     if (dev.ownerId) {
-      const role = await userCanAccessDevice(user.id, dev.id);
+      const token = getCookie(c, COOKIE_NAME);
+      const session = token ? await getSession(token) : null;
+      if (!session) return c.json({ error: 'unauthenticated' }, 401);
+      const role = await userCanAccessDevice(session.userId, dev.id);
       if (!role) return c.json({ error: 'forbidden' }, 403);
     }
     if (!deviceHub.isOnline(dev.id)) return c.json({ error: 'offline' }, 409);

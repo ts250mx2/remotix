@@ -55,6 +55,9 @@ rfd = "0.15"
 # GUI nativa (ventana de chat)
 eframe = "0.29"
 
+# Icono en la bandeja del sistema (minimizar en vez de cerrar)
+tray-icon = "0.19"
+
 # Cliente HTTP para enrolar (POST /api/agent/join) y login
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 dirs = "5"
