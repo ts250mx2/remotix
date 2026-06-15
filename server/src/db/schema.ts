@@ -33,17 +33,24 @@ export const groupMembers = mysqlTable(
 // Dispositivos (PCs) estilo TeamViewer: clave fija permanente. Cada device tiene
 // un dueño (usuario que lo reclamó) y se conceden accesos a otros usuarios/grupos
 // vía `deviceAccess`. `ownerId` es null hasta que alguien lo reclama.
-export const devices = mysqlTable('devices', {
-  id: varchar('id', { length: 40 }).primaryKey(),          // dv_xxx
-  accessKey: varchar('access_key', { length: 16 }).notNull().unique(), // clave fija (9 chars)
-  secretHash: varchar('secret_hash', { length: 255 }).notNull(),
-  name: varchar('name', { length: 255 }).notNull(),
-  ownerId: varchar('owner_id', { length: 40 }),            // us_*; null = sin reclamar
-  os: varchar('os', { length: 64 }),
-  hostname: varchar('hostname', { length: 255 }),
-  lastSeenAt: ts('last_seen_at'),
-  createdAt: ts('created_at').notNull(),
-});
+export const devices = mysqlTable(
+  'devices',
+  {
+    id: varchar('id', { length: 40 }).primaryKey(),          // dv_xxx
+    accessKey: varchar('access_key', { length: 16 }).notNull().unique(), // clave fija (9 chars)
+    secretHash: varchar('secret_hash', { length: 255 }).notNull(),
+    name: varchar('name', { length: 255 }).notNull(),
+    ownerId: varchar('owner_id', { length: 40 }),            // us_*; null = sin reclamar
+    // Identificador estable de la máquina (Windows MachineGuid): evita duplicar el
+    // equipo al reinstalar — se reutiliza el mismo device si ya existe.
+    machineId: varchar('machine_id', { length: 80 }),
+    os: varchar('os', { length: 64 }),
+    hostname: varchar('hostname', { length: 255 }),
+    lastSeenAt: ts('last_seen_at'),
+    createdAt: ts('created_at').notNull(),
+  },
+  (t) => ({ machineIdx: index('devices_machine_idx').on(t.machineId) }),
+);
 
 // Acceso de un principal (us_* o gp_*) a un device. Mismo patrón polimórfico que
 // project_members. Un usuario puede conectarse al device si es dueño, tiene una

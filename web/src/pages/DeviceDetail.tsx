@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, HttpError, type Device, type DeviceGrant, type User } from '../api/client';
 import { Topbar } from '../components/Topbar';
 
@@ -11,6 +11,7 @@ function fmtKey(k: string): string {
 
 export function DeviceDetail() {
   const { id } = useParams<{ id: string }>();
+  const nav = useNavigate();
   const [device, setDevice] = useState<Device | null>(null);
   const [grants, setGrants] = useState<DeviceGrant[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
@@ -46,6 +47,13 @@ export function DeviceDetail() {
     await api.patch(`/api/devices/${id}`, { name: name.trim() });
     setNotice('Nombre actualizado.');
     await loadAll();
+  }
+
+  async function removeDevice() {
+    if (!id) return;
+    if (!confirm(`¿Eliminar este equipo (${device?.name})? Útil para borrar duplicados. No se puede deshacer.`)) return;
+    await api.del(`/api/devices/${id}`);
+    nav('/');
   }
 
   async function addUser(e: FormEvent) {
@@ -111,6 +119,12 @@ export function DeviceDetail() {
             </form>
           )}
           {notice && <div className="muted small">{notice}</div>}
+          {isOwner && (
+            <>
+              <hr className="sep" />
+              <button className="danger ghost" onClick={removeDevice}>Eliminar este equipo</button>
+            </>
+          )}
         </section>
 
         {isOwner ? (

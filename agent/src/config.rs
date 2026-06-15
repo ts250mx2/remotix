@@ -60,6 +60,10 @@ fn lite_path() -> PathBuf {
 
 impl LiteConfig {
     pub fn load() -> Option<LiteConfig> {
+        // Preferir el registro: sobrevive a reinstalar o borrar %APPDATA%.
+        if let Some(c) = registry_load() {
+            return Some(c);
+        }
         let data = std::fs::read_to_string(lite_path()).ok()?;
         let cfg: LiteConfig = serde_json::from_str(&data).ok()?;
         if cfg.device_id.is_empty() || cfg.access_key.is_empty() { None } else { Some(cfg) }
@@ -68,6 +72,7 @@ impl LiteConfig {
         if let Ok(data) = serde_json::to_string_pretty(self) {
             let _ = std::fs::write(lite_path(), data);
         }
+        registry_save(self); // copia durable en el registro
     }
     /// Persiste (o limpia) el login del usuario en este equipo.
     pub fn set_session(token: Option<String>, email: Option<String>) {
@@ -110,3 +115,66 @@ pub fn to_http(server: &str) -> String {
         format!("http://{base}")
     }
 }
+
+// ---------------------------------------------------------------------------
+// Persistencia durable en el registro de Windows (HKCU\Software\Remotix) +
+// identificador estable de la máquina. Evita que reinstalar duplique el equipo.
+// ---------------------------------------------------------------------------
+
+#[cfg(windows)]
+fn registry_load() -> Option<LiteConfig> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let key = RegKey::predef(HKEY_CURRENT_USER).open_subkey("Software\\Remotix").ok()?;
+    let device_id: String = key.get_value("device_id").ok()?;
+    let access_key: String = key.get_value("access_key").ok()?;
+    if device_id.is_empty() || access_key.is_empty() {
+        return None;
+    }
+    let server: String = key.get_value("server").unwrap_or_default();
+    let secret: String = key.get_value("secret").unwrap_or_default();
+    let session_token: String = key.get_value("session_token").unwrap_or_default();
+    let user_email: String = key.get_value("user_email").unwrap_or_default();
+    Some(LiteConfig {
+        server,
+        device_id,
+        access_key,
+        secret,
+        session_token: (!session_token.is_empty()).then_some(session_token),
+        user_email: (!user_email.is_empty()).then_some(user_email),
+    })
+}
+
+#[cfg(windows)]
+fn registry_save(c: &LiteConfig) {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    if let Ok((key, _)) = RegKey::predef(HKEY_CURRENT_USER).create_subkey("Software\\Remotix") {
+        let _ = key.set_value("server", &c.server);
+        let _ = key.set_value("device_id", &c.device_id);
+        let _ = key.set_value("access_key", &c.access_key);
+        let _ = key.set_value("secret", &c.secret);
+        let _ = key.set_value("session_token", &c.session_token.clone().unwrap_or_default());
+        let _ = key.set_value("user_email", &c.user_email.clone().unwrap_or_default());
+    }
+}
+
+/// MachineGuid de Windows: estable por instalación de SO, no cambia al reinstalar
+/// la app. El server lo usa para no duplicar el equipo.
+#[cfg(windows)]
+pub fn machine_id() -> Option<String> {
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    use winreg::RegKey;
+    let key = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey("SOFTWARE\\Microsoft\\Cryptography")
+        .ok()?;
+    let guid: String = key.get_value("MachineGuid").ok()?;
+    (!guid.trim().is_empty()).then_some(guid)
+}
+
+#[cfg(not(windows))]
+fn registry_load() -> Option<LiteConfig> { None }
+#[cfg(not(windows))]
+fn registry_save(_c: &LiteConfig) {}
+#[cfg(not(windows))]
+pub fn machine_id() -> Option<String> { None }

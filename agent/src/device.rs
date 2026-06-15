@@ -20,7 +20,11 @@ pub async fn register_device(server: &str, name: &str) -> anyhow::Result<LiteCon
     #[serde(rename_all = "camelCase")]
     struct Resp { device_id: String, access_key: String, secret: String }
     let url = format!("{}/api/device/register", to_http(server));
-    let resp = reqwest::Client::new().post(&url).json(&serde_json::json!({ "name": name })).send().await?;
+    let mut body = serde_json::json!({ "name": name });
+    if let Some(mid) = crate::config::machine_id() {
+        body["machineId"] = serde_json::Value::String(mid);
+    }
+    let resp = reqwest::Client::new().post(&url).json(&body).send().await?;
     if !resp.status().is_success() {
         anyhow::bail!("no se pudo registrar ({})", resp.status());
     }
@@ -38,7 +42,9 @@ pub async fn register_device(server: &str, name: &str) -> anyhow::Result<LiteCon
 /// arranque con Windows la primera vez, y corre el dispositivo.
 pub async fn run_lite_unattended(server: String, name: String, ui: std::sync::mpsc::Sender<LiteEvent>) {
     let cfg = loop {
-        if let Some(c) = LiteConfig::load() { break c; }
+        // Reusa la identidad guardada y la copia al registro (durable) por si solo
+        // estaba en %APPDATA%. Así nunca se re-registra/duplica un equipo conocido.
+        if let Some(c) = LiteConfig::load() { c.save(); break c; }
         let _ = ui.send(LiteEvent::Status("Registrando este equipo…".into()));
         match register_device(&server, &name).await {
             Ok(c) => {

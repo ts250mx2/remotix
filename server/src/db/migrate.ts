@@ -33,12 +33,17 @@ const STATEMENTS: string[] = [
     secret_hash VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
     owner_id VARCHAR(40),
+    machine_id VARCHAR(80),
     os VARCHAR(64),
     hostname VARCHAR(255),
     last_seen_at DATETIME(3),
     created_at DATETIME(3) NOT NULL,
     FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // Idempotente para bases ya creadas (se ignora si la columna/índice existen).
+  `ALTER TABLE devices ADD COLUMN machine_id VARCHAR(80)`,
+  `CREATE INDEX devices_machine_idx ON devices(machine_id)`,
 
   `CREATE TABLE IF NOT EXISTS device_access (
     device_id VARCHAR(40) NOT NULL,

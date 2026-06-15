@@ -45,6 +45,105 @@ fn format_key(k: &str) -> String {
     k.chars().collect::<Vec<_>>().chunks(3).map(|c| c.iter().collect::<String>()).collect::<Vec<_>>().join("-")
 }
 
+// ---- Tema premium (oscuro de marca) ----
+use egui::Color32;
+const BG: Color32 = Color32::from_rgb(0x0D, 0x13, 0x1E);
+const PANEL: Color32 = Color32::from_rgb(0x11, 0x18, 0x26);
+const CARD: Color32 = Color32::from_rgb(0x17, 0x20, 0x31);
+const CARD_HI: Color32 = Color32::from_rgb(0x20, 0x2C, 0x42);
+const BORDER: Color32 = Color32::from_rgb(0x26, 0x33, 0x4A);
+const TEXT: Color32 = Color32::from_rgb(0xE7, 0xED, 0xF6);
+const MUTED: Color32 = Color32::from_rgb(0x8A, 0x97, 0xAD);
+const ACCENT: Color32 = Color32::from_rgb(0x3B, 0x82, 0xF6);
+const ACCENT_HI: Color32 = Color32::from_rgb(0x55, 0x96, 0xFF);
+const GREEN: Color32 = Color32::from_rgb(0x34, 0xD3, 0x99);
+const KEYC: Color32 = Color32::from_rgb(0x6F, 0xD8, 0xFF);
+const REDC: Color32 = Color32::from_rgb(0xF8, 0x71, 0x71);
+
+fn setup_style(ctx: &egui::Context) {
+    use egui::{FontFamily, FontId, Margin, Rounding, Stroke, TextStyle};
+    let mut style = (*ctx.style()).clone();
+    let mut v = egui::Visuals::dark();
+    let rnd = Rounding::same(8.0);
+    v.panel_fill = PANEL;
+    v.window_fill = PANEL;
+    v.extreme_bg_color = Color32::from_rgb(0x0B, 0x10, 0x1A); // fondo de inputs
+    v.faint_bg_color = CARD;
+    v.hyperlink_color = ACCENT_HI;
+    v.selection.bg_fill = Color32::from_rgb(0x1E, 0x3A, 0x60);
+    v.selection.stroke = Stroke::new(1.0, ACCENT);
+    let set = |w: &mut egui::style::WidgetVisuals, fill: Color32, stroke: Color32, fg: Color32| {
+        w.bg_fill = fill; w.weak_bg_fill = fill;
+        w.bg_stroke = Stroke::new(1.0, stroke);
+        w.fg_stroke = Stroke::new(1.0, fg);
+        w.rounding = rnd;
+    };
+    set(&mut v.widgets.noninteractive, PANEL, BORDER, TEXT);
+    set(&mut v.widgets.inactive, CARD_HI, BORDER, TEXT);
+    set(&mut v.widgets.hovered, Color32::from_rgb(0x29, 0x37, 0x52), ACCENT, Color32::WHITE);
+    set(&mut v.widgets.active, ACCENT, ACCENT, Color32::WHITE);
+    set(&mut v.widgets.open, CARD_HI, BORDER, TEXT);
+    style.visuals = v;
+    style.spacing.item_spacing = egui::vec2(10.0, 10.0);
+    style.spacing.button_padding = egui::vec2(14.0, 8.0);
+    style.spacing.interact_size.y = 30.0;
+    style.spacing.window_margin = Margin::same(0.0);
+    style.text_styles.insert(TextStyle::Heading, FontId::new(20.0, FontFamily::Proportional));
+    style.text_styles.insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
+    style.text_styles.insert(TextStyle::Button, FontId::new(14.0, FontFamily::Proportional));
+    style.text_styles.insert(TextStyle::Small, FontId::new(12.0, FontFamily::Proportional));
+    style.text_styles.insert(TextStyle::Monospace, FontId::new(14.0, FontFamily::Monospace));
+    ctx.set_style(style);
+}
+
+/// Tarjeta redondeada con borde sutil.
+fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::none()
+        .fill(CARD)
+        .stroke(egui::Stroke::new(1.0, BORDER))
+        .rounding(egui::Rounding::same(12.0))
+        .inner_margin(egui::Margin::same(16.0))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui);
+        });
+}
+
+/// Botón primario de acento.
+fn primary(ui: &mut egui::Ui, text: &str, enabled: bool) -> egui::Response {
+    let btn = egui::Button::new(egui::RichText::new(text).color(Color32::WHITE).strong())
+        .fill(if enabled { ACCENT } else { CARD_HI })
+        .rounding(egui::Rounding::same(8.0))
+        .min_size(egui::vec2(0.0, 34.0));
+    ui.add_enabled(enabled, btn)
+}
+
+fn dot(ui: &mut egui::Ui, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(11.0, 11.0), egui::Sense::hover());
+    ui.painter().circle_filled(rect.center(), 4.5, color);
+}
+
+fn muted(s: &str) -> egui::RichText {
+    egui::RichText::new(s).color(MUTED)
+}
+
+/// Icono de la ventana: cuadrado con degradado azul→cian.
+fn app_icon() -> egui::IconData {
+    let (w, h) = (64usize, 64usize);
+    let mut rgba = vec![0u8; w * h * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) * 4;
+            let t = (x + y) as f32 / (w + h) as f32;
+            rgba[i] = (0x3B as f32 * (1.0 - t) + 0x22 as f32 * t) as u8;
+            rgba[i + 1] = (0x82 as f32 * (1.0 - t) + 0xC7 as f32 * t) as u8;
+            rgba[i + 2] = (0xF6 as f32 * (1.0 - t) + 0xE8 as f32 * t) as u8;
+            rgba[i + 3] = 255;
+        }
+    }
+    egui::IconData { rgba, width: w as u32, height: h as u32 }
+}
+
 /// Icono en la bandeja del sistema + ids de su menú.
 struct TrayState {
     _tray: TrayIcon,
@@ -181,13 +280,17 @@ fn main() -> Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([580.0, 640.0])
-            .with_min_inner_size([460.0, 420.0])
+            .with_inner_size([560.0, 660.0])
+            .with_min_inner_size([460.0, 460.0])
+            .with_icon(std::sync::Arc::new(app_icon()))
             .with_title("Remotix"),
         ..Default::default()
     };
-    eframe::run_native("Remotix", options, Box::new(move |_cc| Ok(Box::new(app))))
-        .map_err(|e| anyhow::anyhow!("error de la ventana: {e}"))?;
+    eframe::run_native("Remotix", options, Box::new(move |cc| {
+        setup_style(&cc.egui_ctx);
+        Ok(Box::new(app))
+    }))
+    .map_err(|e| anyhow::anyhow!("error de la ventana: {e}"))?;
     // `rt` se mantiene vivo hasta aquí (no soltar antes de cerrar la ventana).
     drop(rt);
     Ok(())
@@ -447,96 +550,117 @@ impl eframe::App for RemotixApp {
 
         let mut action: Option<Action> = None;
 
-        egui::TopBottomPanel::top("hdr").show(ctx, |ui| {
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.heading("Remotix");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(u) = &user {
-                        if ui.button("Salir").clicked() { action = Some(Action::Logout); }
-                        ui.label(egui::RichText::new(&u.name).strong());
-                    }
-                });
-            });
-            ui.add_space(6.0);
-        });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // --- Rol host: clave + estado (siempre visible) ---
-            ui.group(|ui| {
-                ui.label(egui::RichText::new("ESTE EQUIPO (acepta conexiones)").small().weak());
+        egui::TopBottomPanel::top("hdr")
+            .frame(egui::Frame::none().fill(PANEL).inner_margin(egui::Margin::symmetric(18.0, 13.0)))
+            .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Clave:");
-                    match &self.host_code {
-                        Some(c) => { ui.label(egui::RichText::new(format_key(c)).strong().monospace().size(20.0).color(egui::Color32::from_rgb(255, 210, 102))); }
-                        None => { ui.label(egui::RichText::new("·········").weak().monospace().size(20.0)); }
-                    }
-                });
-                ui.label(egui::RichText::new(&self.host_status).weak());
-                if ui.checkbox(&mut self.autostart, "Iniciar con Windows").changed() {
-                    action = Some(Action::ToggleAutostart(self.autostart));
-                }
-            });
-
-            ui.add_space(12.0);
-
-            // Conectar por clave — SIEMPRE disponible (con o sin login). Equipos sin
-            // dueño se conectan solo con la clave; los que tienen dueño exigen login.
-            ui.group(|ui| {
-                ui.label(egui::RichText::new("Conectar a otra PC por su clave").strong());
-                ui.horizontal(|ui| {
-                    let resp = ui.add(egui::TextEdit::singleline(&mut self.key_input)
-                        .hint_text("XXX-XXX-XXX").desired_width(150.0));
-                    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if (ui.button("Conectar").clicked() || enter) && !self.key_input.trim().is_empty() {
-                        action = Some(Action::ConnectByKey(self.key_input.trim().to_string()));
-                    }
+                    let (lr, _) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+                    ui.painter().rect_filled(lr, egui::Rounding::same(6.0), ACCENT);
+                    ui.painter().circle_filled(lr.center(), 3.2, Color32::WHITE);
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new("Remotix").size(19.0).strong().color(TEXT));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if let Some(u) = &user {
+                            if ui.button("Salir").clicked() { action = Some(Action::Logout); }
+                            ui.add_space(4.0);
+                            ui.label(muted(&u.name));
+                            dot(ui, GREEN);
+                        }
+                    });
                 });
             });
-            ui.add_space(12.0);
 
-            if let Some(_u) = &user {
-                // --- Libreta de PCs (con sesión) ---
-                ui.heading("Mis PCs");
-                ui.label(egui::RichText::new("Equipos a los que tienes acceso.").small().weak());
-                ui.add_space(6.0);
-                if let Some(e) = &error { ui.colored_label(egui::Color32::from_rgb(229, 115, 115), e); }
-                if devices.is_empty() {
-                    ui.label(egui::RichText::new("Aún no tienes PCs. Inicia sesión en otro equipo con Remotix para que aparezca aquí.").weak());
-                }
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(BG).inner_margin(egui::Margin::same(18.0)))
+            .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    for d in &devices {
+                    // --- Este equipo (host) ---
+                    card(ui, |ui| {
+                        ui.label(muted("ESTE EQUIPO · ACEPTA CONEXIONES"));
+                        ui.add_space(10.0);
+                        match &self.host_code {
+                            Some(c) => { ui.label(egui::RichText::new(format_key(c)).monospace().size(30.0).strong().color(KEYC)); }
+                            None => { ui.label(egui::RichText::new("· · · · · · · · ·").monospace().size(28.0).color(MUTED)); }
+                        }
+                        ui.add_space(8.0);
                         ui.horizontal(|ui| {
-                            let dot = if d.online { "🟢" } else { "⚪" };
-                            ui.label(dot);
-                            ui.label(egui::RichText::new(&d.name).strong());
-                            ui.label(egui::RichText::new(if d.role == "owner" { "dueño" } else { "compartido" }).small().weak());
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.add_enabled(d.online, egui::Button::new("Conectar")).clicked() {
-                                    action = Some(Action::Connect(d.clone()));
-                                }
-                            });
+                            let s = self.host_status.clone();
+                            let online = s.contains("línea") || s.contains("Conectado") || s.contains("ompart");
+                            dot(ui, if online { GREEN } else { MUTED });
+                            ui.label(muted(&s));
                         });
-                        ui.separator();
+                        ui.add_space(12.0);
+                        if ui.checkbox(&mut self.autostart, "Iniciar con Windows").changed() {
+                            action = Some(Action::ToggleAutostart(self.autostart));
+                        }
+                    });
+
+                    ui.add_space(14.0);
+
+                    // --- Conectar por clave ---
+                    card(ui, |ui| {
+                        ui.label(egui::RichText::new("Conectar a otra PC").size(15.0).strong().color(TEXT));
+                        ui.label(muted("Escribe la clave del equipo remoto"));
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            let resp = ui.add(
+                                egui::TextEdit::singleline(&mut self.key_input)
+                                    .hint_text("XXX-XXX-XXX")
+                                    .desired_width(190.0)
+                                    .margin(egui::Margin::symmetric(10.0, 8.0)),
+                            );
+                            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            let go = primary(ui, "Conectar", true).clicked() || enter;
+                            if go && !self.key_input.trim().is_empty() {
+                                action = Some(Action::ConnectByKey(self.key_input.trim().to_string()));
+                            }
+                        });
+                    });
+
+                    ui.add_space(14.0);
+
+                    if user.is_some() {
+                        // --- Libreta de PCs ---
+                        card(ui, |ui| {
+                            ui.label(egui::RichText::new("Mis PCs").size(15.0).strong().color(TEXT));
+                            ui.label(muted("Equipos a los que tienes acceso"));
+                            if let Some(e) = &error { ui.add_space(4.0); ui.colored_label(REDC, e); }
+                            ui.add_space(8.0);
+                            if devices.is_empty() {
+                                ui.label(muted("Aún no tienes PCs. Inicia sesión en otro equipo con Remotix para que aparezca aquí."));
+                            }
+                            for (idx, d) in devices.iter().enumerate() {
+                                if idx > 0 { ui.add_space(3.0); ui.separator(); ui.add_space(3.0); }
+                                ui.horizontal(|ui| {
+                                    dot(ui, if d.online { GREEN } else { MUTED });
+                                    ui.label(egui::RichText::new(&d.name).strong().color(TEXT));
+                                    ui.label(muted(if d.role == "owner" { "dueño" } else { "compartido" }));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if primary(ui, "Conectar", d.online).clicked() {
+                                            action = Some(Action::Connect(d.clone()));
+                                        }
+                                    });
+                                });
+                            }
+                        });
+                    } else {
+                        // --- Iniciar sesión ---
+                        card(ui, |ui| {
+                            ui.label(egui::RichText::new("Iniciar sesión").size(15.0).strong().color(TEXT));
+                            ui.label(muted("Para ver tu libreta de PCs (opcional)"));
+                            ui.add_space(10.0);
+                            ui.add(egui::TextEdit::singleline(&mut self.email).hint_text("Email").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10.0, 8.0)));
+                            ui.add_space(6.0);
+                            ui.add(egui::TextEdit::singleline(&mut self.password).password(true).hint_text("Contraseña").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10.0, 8.0)));
+                            if let Some(e) = &error { ui.add_space(4.0); ui.colored_label(REDC, e); }
+                            ui.add_space(10.0);
+                            if primary(ui, if busy { "Entrando…" } else { "Entrar" }, !busy).clicked() {
+                                action = Some(Action::Login);
+                            }
+                        });
                     }
                 });
-            } else {
-                // --- Sin login: formulario ---
-                ui.heading("Iniciar sesión");
-                ui.label(egui::RichText::new("Entra con tu cuenta para conectarte a tus PCs. (Sin login, este equipo solo acepta conexiones.)").small().weak());
-                ui.add_space(6.0);
-                ui.horizontal(|ui| { ui.label("Email:"); ui.text_edit_singleline(&mut self.email); });
-                ui.horizontal(|ui| {
-                    ui.label("Clave:");
-                    ui.add(egui::TextEdit::singleline(&mut self.password).password(true));
-                });
-                if let Some(e) = &error { ui.colored_label(egui::Color32::from_rgb(229, 115, 115), e); }
-                ui.add_space(4.0);
-                if ui.add_enabled(!busy, egui::Button::new(if busy { "Entrando…" } else { "Entrar" })).clicked() {
-                    action = Some(Action::Login);
-                }
-            }
-        });
+            });
 
         // Ejecuta la acción fuera del closure (evita conflictos de préstamo).
         match action {
