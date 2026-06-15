@@ -211,6 +211,7 @@ struct ActiveViewer {
     tex: Option<egui::TextureHandle>,
     size: [usize; 2],
     prev_mods: egui::Modifiers,
+    fullscreen: bool,
 }
 
 enum Action {
@@ -343,7 +344,24 @@ fn spawn_viewer(ui: &Arc<UiShared>, server: &str, code: String, name: String) {
     });
     *ui.pending_viewer.lock() = Some(ActiveViewer {
         shared, input_tx, name, tex: None, size: [0, 0], prev_mods: egui::Modifiers::default(),
+        fullscreen: false,
     });
+}
+
+/// Botones de transferencia de archivos (reutilizados en ventana y pantalla completa).
+fn file_buttons(ui: &mut egui::Ui, av: &ActiveViewer, rt: &tokio::runtime::Handle) {
+    let files_dc = av.shared.files_dc.lock().clone();
+    let on = files_dc.is_some();
+    if ui.add_enabled(on, egui::Button::new("📥 Pedir archivo")).clicked() {
+        if let Some(dc) = files_dc.clone() {
+            rt.spawn(async move { files::request_file(dc).await; });
+        }
+    }
+    if ui.add_enabled(on, egui::Button::new("📤 Enviar archivo")).clicked() {
+        if let Some(dc) = files_dc {
+            rt.spawn(async move { files::pick_and_send(dc); });
+        }
+    }
 }
 
 impl eframe::App for RemotixApp {
@@ -521,27 +539,52 @@ impl eframe::App for RemotixApp {
                     .with_title(title)
                     .with_inner_size([1280.0, 760.0]);
                 ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("remotix-viewer"), builder, |vctx, _class| {
-                    egui::TopBottomPanel::top("vstat").show(vctx, |ui| {
-                        ui.add_space(2.0);
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(av.shared.status.lock().clone()).weak());
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let files_dc = av.shared.files_dc.lock().clone();
-                                let on = files_dc.is_some();
-                                if ui.add_enabled(on, egui::Button::new("📥 Pedir archivo")).clicked() {
-                                    if let Some(dc) = files_dc.clone() {
-                                        rt.spawn(async move { files::request_file(dc).await; });
-                                    }
-                                }
-                                if ui.add_enabled(on, egui::Button::new("📤 Enviar archivo")).clicked() {
-                                    if let Some(dc) = files_dc {
-                                        rt.spawn(async move { files::pick_and_send(dc); });
-                                    }
-                                }
+                    // Maximizar la ventana → pantalla completa (estilo TeamViewer).
+                    let maximized = vctx.input(|i| i.viewport().maximized.unwrap_or(false));
+                    if maximized && !av.fullscreen {
+                        av.fullscreen = true;
+                        vctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+                    }
+
+                    if av.fullscreen {
+                        // Barra flotante arriba: restaurar / minimizar / archivos.
+                        egui::Area::new(egui::Id::new("vp-bar"))
+                            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 6.0))
+                            .show(vctx, |ui| {
+                                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new(av.shared.status.lock().clone()).small().weak());
+                                        ui.separator();
+                                        if ui.button("🗗 Restaurar").clicked() {
+                                            av.fullscreen = false;
+                                            vctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                            vctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+                                        }
+                                        if ui.button("➖ Minimizar").clicked() {
+                                            vctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                                        }
+                                        ui.separator();
+                                        file_buttons(ui, av, &rt);
+                                    });
+                                });
                             });
+                    } else {
+                        egui::TopBottomPanel::top("vstat").show(vctx, |ui| {
+                            ui.add_space(2.0);
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(av.shared.status.lock().clone()).weak());
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button("⛶ Pantalla completa").clicked() {
+                                        av.fullscreen = true;
+                                        vctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+                                    }
+                                    file_buttons(ui, av, &rt);
+                                });
+                            });
+                            ui.add_space(2.0);
                         });
-                        ui.add_space(2.0);
-                    });
+                    }
+
                     egui::CentralPanel::default().show(vctx, |ui| {
                         render_viewer(ui, vctx, av);
                     });
