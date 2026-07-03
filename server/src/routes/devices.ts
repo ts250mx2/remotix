@@ -36,17 +36,36 @@ export const deviceManageRoutes = new Hono()
     return c.json({ devices });
   })
 
-  // Reclamar un device sin dueño usando su clave fija (lo usa el exe al loguearse).
+  // Suscribir un device por su clave fija (self-service). Lo usa el exe al
+  // loguearse y el portal ("Agregar PC por clave"). La clave YA es la credencial
+  // para conectar, así que conocerla basta para añadir la PC a tu cuenta:
+  //   · sin dueño        → el primero que la reclama queda como dueño (gestiona);
+  //   · con otro dueño   → te suscribes (auto-acceso) y la ves en tu lista;
+  // de modo que una misma PC puede estar en las cuentas de varios usuarios.
   .post('/claim', zValidator('json', claimSchema), async (c) => {
     const user = c.get('user');
     const key = normalizeKey(c.req.valid('json').accessKey);
     const dev = (await db.select().from(tables.devices).where(eq(tables.devices.accessKey, key)))[0];
     if (!dev) return c.json({ error: 'not_found' }, 404);
-    if (dev.ownerId && dev.ownerId !== user.id) return c.json({ error: 'already_owned' }, 409);
     if (!dev.ownerId) {
       await db.update(tables.devices).set({ ownerId: user.id }).where(eq(tables.devices.id, dev.id));
+    } else if (dev.ownerId !== user.id) {
+      await db.insert(tables.deviceAccess)
+        .values({ deviceId: dev.id, principalId: user.id, createdAt: new Date() })
+        .onDuplicateKeyUpdate({ set: { principalId: user.id } });
     }
     return c.json({ device: { id: dev.id, name: dev.name, accessKey: dev.accessKey } });
+  })
+
+  // Darse de baja de una PC compartida (quita TU acceso; no borra la PC). El
+  // dueño no puede "desuscribirse": debe eliminarla (DELETE /:id).
+  .delete('/:id/subscription', async (c) => {
+    const user = c.get('user');
+    await db.delete(tables.deviceAccess).where(and(
+      eq(tables.deviceAccess.deviceId, c.req.param('id')),
+      eq(tables.deviceAccess.principalId, user.id),
+    ));
+    return c.json({ ok: true });
   })
 
   // Renombrar (solo dueño).

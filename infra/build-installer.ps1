@@ -1,10 +1,12 @@
-# Compila el instalador desatendido de Remotix (RemotixSetup.exe).
+# Compila el instalador del HOST desatendido de Remotix (RemotixHostSetup.exe).
+# Es el servicio de Windows que arranca en el boot; es tambien el destino de la
+# auto-actualizacion. Para la app interactiva usa build-app-installer.ps1.
 #
 # 1) Compila el agente (remotix-lite) en release con el servidor de produccion
 #    "baked" dentro del exe (REMOTIX_DEFAULT_SERVER).
 # 2) (Opcional) Firma el exe para evitar el aviso de SmartScreen.
 # 3) Invoca el compilador de Inno Setup (ISCC.exe) sobre infra\installer\remotix.iss
-#    para generar infra\installer\Output\RemotixSetup.exe.
+#    para generar infra\installer\Output\RemotixHostSetup.exe.
 #
 # Uso:
 #   infra\build-installer.ps1                                          # servidor por defecto (produccion)
@@ -77,20 +79,20 @@ Write-Host "Compilando el instalador con Inno Setup…" -ForegroundColor Cyan
 & $iscc "/DAppVersion=$Version" $iss
 if ($LASTEXITCODE -ne 0) { Write-Host "ISCC fallo." -ForegroundColor Red; exit 1 }
 
-$setup = Join-Path $PSScriptRoot 'installer\Output\RemotixSetup.exe'
+$setup = Join-Path $PSScriptRoot 'installer\Output\RemotixHostSetup.exe'
 if ($Sign -and (Test-Path $setup)) {
     & (Join-Path $PSScriptRoot 'sign.ps1') -File $setup
 }
 
 # --- 6) Publicar en server/public: el instalador + el manifiesto de version ---
 # El servicio de cada equipo consulta /api/update/latest (que lee este manifiesto)
-# y descarga /download/RemotixSetup.exe para auto-actualizarse.
+# y descarga /download/RemotixHostSetup.exe para auto-actualizarse.
 $publicDir = Join-Path $root 'server\public'
 New-Item -ItemType Directory -Force -Path $publicDir | Out-Null
-Copy-Item $setup (Join-Path $publicDir 'RemotixSetup.exe') -Force
+Copy-Item $setup (Join-Path $publicDir 'RemotixHostSetup.exe') -Force
 $manifest = [ordered]@{
     version   = $Version
-    url       = '/download/RemotixSetup.exe'
+    url       = '/download/RemotixHostSetup.exe'
     notes     = ''
     mandatory = $false
 }
@@ -101,10 +103,10 @@ $json = $manifest | ConvertTo-Json
     $json,
     (New-Object System.Text.UTF8Encoding($false))
 )
-Write-Host "Publicado en server\public: RemotixSetup.exe + remotix-latest.json (v$Version)" -ForegroundColor Green
+Write-Host "Publicado en server\public: RemotixHostSetup.exe + remotix-latest.json (v$Version)" -ForegroundColor Green
 
 Write-Host "`nListo: $setup" -ForegroundColor Green
-Write-Host "Instalacion desatendida en el equipo remoto:  RemotixSetup.exe /VERYSILENT /SUPPRESSMSGBOXES" -ForegroundColor Green
+Write-Host "Instalacion desatendida en el equipo remoto:  RemotixHostSetup.exe /VERYSILENT /SUPPRESSMSGBOXES" -ForegroundColor Green
 if (-not $Sign) {
     Write-Host "AVISO: sin firmar. SmartScreen avisara al usuario. Usa -Sign con tu certificado para produccion." -ForegroundColor Yellow
 }

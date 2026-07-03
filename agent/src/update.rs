@@ -109,7 +109,7 @@ pub async fn download_and_apply(server: &str, url: &str) -> anyhow::Result<()> {
     let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build()?;
     let bytes = client.get(&full).send().await?.error_for_status()?.bytes().await?;
 
-    let tmp = std::env::temp_dir().join("RemotixSetup.exe");
+    let tmp = std::env::temp_dir().join("RemotixHostSetup.exe");
     std::fs::write(&tmp, &bytes)?;
 
     std::process::Command::new(&tmp)

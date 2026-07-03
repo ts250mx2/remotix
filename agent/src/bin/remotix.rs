@@ -17,8 +17,8 @@ use eframe::egui;
 use parking_lot::Mutex;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::warn;
-use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem};
-use tray_icon::{TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use remotix_agent::account::{Account, DeviceInfo, UserInfo};
 use remotix_agent::autostart;
@@ -144,12 +144,20 @@ fn app_icon() -> egui::IconData {
     egui::IconData { rgba, width: w as u32, height: h as u32 }
 }
 
-/// Icono en la bandeja del sistema + ids de su menú.
+/// Icono en la bandeja del sistema. Se mantiene vivo mientras exista; al soltarlo
+/// (Drop) el icono desaparece de la bandeja.
 struct TrayState {
     _tray: TrayIcon,
-    show_id: MenuId,
-    quit_id: MenuId,
 }
+
+/// Orden que los handlers de la bandeja envían al bucle de la GUI.
+enum TrayCmd {
+    Show,
+    Quit,
+}
+
+/// Cola compartida entre los handlers de la bandeja (hilos del SO) y la GUI.
+type TrayQueue = Arc<Mutex<Vec<TrayCmd>>>;
 
 fn make_tray_icon() -> Option<tray_icon::Icon> {
     let (w, h) = (32u32, 32u32);
@@ -160,7 +168,11 @@ fn make_tray_icon() -> Option<tray_icon::Icon> {
     tray_icon::Icon::from_rgba(rgba, w, h).ok()
 }
 
-fn create_tray() -> Option<TrayState> {
+/// Crea el icono de la bandeja y registra handlers que traducen sus eventos a
+/// comandos y DESPIERTAN el bucle de eframe (`request_repaint`). Esto es la clave
+/// del fix: sin el wake-up explícito, con la ventana oculta el bucle duerme y los
+/// clics/menú de la bandeja se pierden (por eso "no hacía nada" al reabrir).
+fn create_tray(ctx: &egui::Context) -> Option<(TrayState, TrayQueue)> {
     let menu = Menu::new();
     let show = MenuItem::new("Abrir Remotix", true, None);
     let quit = MenuItem::new("Salir", true, None);
@@ -168,12 +180,45 @@ fn create_tray() -> Option<TrayState> {
     menu.append(&quit).ok()?;
     let show_id = show.id().clone();
     let quit_id = quit.id().clone();
+
     let mut builder = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip("Remotix");
     if let Some(icon) = make_tray_icon() {
         builder = builder.with_icon(icon);
     }
     let tray = builder.build().ok()?;
-    Some(TrayState { _tray: tray, show_id, quit_id })
+
+    let queue: TrayQueue = Arc::new(Mutex::new(Vec::new()));
+
+    // Menú de la bandeja (Abrir / Salir). El handler debe ser Send+Sync, por eso
+    // usamos una cola Arc<Mutex<…>> en vez de un canal (Sender no es Sync).
+    let ctx_m = ctx.clone();
+    let q_m = queue.clone();
+    MenuEvent::set_event_handler(Some(move |ev: MenuEvent| {
+        if ev.id == show_id {
+            q_m.lock().push(TrayCmd::Show);
+        } else if ev.id == quit_id {
+            q_m.lock().push(TrayCmd::Quit);
+        }
+        ctx_m.request_repaint();
+    }));
+
+    // Clic izquierdo (simple o doble) en el icono → abrir. El clic derecho abre el
+    // menú (lo gestiona tray-icon) y no debe reabrir la ventana.
+    let ctx_t = ctx.clone();
+    let q_t = queue.clone();
+    TrayIconEvent::set_event_handler(Some(move |ev: TrayIconEvent| {
+        let open = matches!(
+            ev,
+            TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. }
+                | TrayIconEvent::DoubleClick { button: MouseButton::Left, .. }
+        );
+        if open {
+            q_t.lock().push(TrayCmd::Show);
+        }
+        ctx_t.request_repaint();
+    }));
+
+    Some((TrayState { _tray: tray }, queue))
 }
 
 /// Modo headless: corre solo el visor contra un código y reporta si llegan frames
@@ -259,7 +304,7 @@ fn main() -> Result<()> {
         });
     }
 
-    let app = RemotixApp {
+    let mut app = RemotixApp {
         rt: handle,
         account,
         ui,
@@ -274,8 +319,7 @@ fn main() -> Result<()> {
         last_refresh: Instant::now(),
         server,
         tray: None,
-        tray_tried: false,
-        want_quit: false,
+        tray_queue: None,
     };
 
     let options = eframe::NativeOptions {
@@ -288,6 +332,12 @@ fn main() -> Result<()> {
     };
     eframe::run_native("Remotix", options, Box::new(move |cc| {
         setup_style(&cc.egui_ctx);
+        // La bandeja se crea aquí (hilo principal, con el contexto ya disponible
+        // para despertar el bucle al recibir sus eventos).
+        if let Some((tray, queue)) = create_tray(&cc.egui_ctx) {
+            app.tray = Some(tray);
+            app.tray_queue = Some(queue);
+        }
         Ok(Box::new(app))
     }))
     .map_err(|e| anyhow::anyhow!("error de la ventana: {e}"))?;
@@ -340,8 +390,7 @@ struct RemotixApp {
     last_refresh: Instant,
     server: String,
     tray: Option<TrayState>,
-    tray_tried: bool,
-    want_quit: bool,
+    tray_queue: Option<TrayQueue>,
 }
 
 impl RemotixApp {
@@ -498,33 +547,28 @@ impl eframe::App for RemotixApp {
             }
         }
 
-        // Bandeja del sistema: crear (una vez) y atender sus eventos.
-        if !self.tray_tried {
-            self.tray = create_tray();
-            self.tray_tried = true;
-        }
-        if let Some(tray) = &self.tray {
-            let mut show = false;
-            while let Ok(ev) = MenuEvent::receiver().try_recv() {
-                if ev.id == tray.show_id {
-                    show = true;
-                } else if ev.id == tray.quit_id {
-                    self.want_quit = true;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        // Bandeja del sistema: procesa los comandos que enviaron sus handlers.
+        // (La bandeja se creó al arrancar y sus handlers despiertan el bucle con
+        // request_repaint, así reabrir/salir funcionan aun con la ventana oculta.)
+        let tray_cmds: Vec<TrayCmd> = self
+            .tray_queue
+            .as_ref()
+            .map(|q| q.lock().drain(..).collect())
+            .unwrap_or_default();
+        for cmd in tray_cmds {
+            match cmd {
+                TrayCmd::Show => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                TrayCmd::Quit => {
+                    self.tray = None; // quita el icono de la bandeja
+                    std::process::exit(0); // "Salir" cierra de verdad
                 }
             }
-            while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
-                if matches!(ev, TrayIconEvent::DoubleClick { .. }) {
-                    show = true;
-                }
-            }
-            if show {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-            }
         }
-        // Cerrar la ventana principal = minimizar a la bandeja (no salir), salvo "Salir".
-        if ctx.input(|i| i.viewport().close_requested()) && !self.want_quit && self.tray.is_some() {
+        // Cerrar la ventana (X) = minimizar a la bandeja (no salir de la app).
+        if ctx.input(|i| i.viewport().close_requested()) && self.tray.is_some() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }

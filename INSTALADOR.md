@@ -1,4 +1,15 @@
-# Instalador desatendido de Remotix
+# Instaladores de Remotix
+
+Hay **dos** instaladores, para dos usos distintos:
+
+| Instalador | Genera con | Para qué |
+|---|---|---|
+| **`RemotixSetup.exe`** (app interactiva) | `infra\build-app-installer.ps1` | La app con ventana: iniciar sesión, ver tus PCs, conectar por clave, y ser host por su propia clave. Instalación por usuario (sin admin). Es la **descarga principal** de la web. |
+| **`RemotixHostSetup.exe`** (host desatendido) | `infra\build-installer.ps1` | El servicio de Windows que arranca en el boot sin interacción (este documento). Es también el destino de la **auto-actualización**. |
+
+---
+
+Este documento describe el **host desatendido** (`RemotixHostSetup.exe`).
 
 Remotix se instala y queda **corriendo solo desde el arranque del equipo, sin
 ninguna interacción humana** (acceso desatendido estilo TeamViewer). Al terminar
@@ -8,7 +19,7 @@ reiniciar y antes de que nadie inicie sesión.
 ## Cómo funciona (arquitectura)
 
 ```
-Instalador (RemotixSetup.exe, requiere admin)
+Instalador (RemotixHostSetup.exe, requiere admin)
    └─ copia  Remotix.exe → C:\Program Files\Remotix\
    └─ ejecuta  Remotix.exe install   → registra y arranca el servicio
 
@@ -54,7 +65,7 @@ infra\build-installer.ps1 -Server wss://soporte.midominio.com
 infra\build-installer.ps1 -Version 1.2.0 -Sign
 ```
 
-Salida: `infra\installer\Output\RemotixSetup.exe`.
+Salida: `infra\installer\Output\RemotixHostSetup.exe`.
 
 ## Instalar en el equipo remoto
 
@@ -62,7 +73,7 @@ Con asistente (doble clic) o de forma **totalmente silenciosa**:
 
 ```cmd
 :: Silencioso, sin barra de progreso ni cuadros de dialogo (ideal para desplegar)
-RemotixSetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+RemotixHostSetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 Tras la instalación (silenciosa o no), el servicio queda **arrancado y en
@@ -93,9 +104,9 @@ web (columna **Versión** en «Mis PCs» y en el detalle de cada equipo).
    # Sube la version en agent\Cargo.toml (p. ej. 1.0.1) y genera el instalador:
    infra\build-installer.ps1 -Version 1.0.1
    ```
-   Esto compila el exe, genera `RemotixSetup.exe` y **publica en `server/public`**:
-   - `RemotixSetup.exe`  → servido en `/download/RemotixSetup.exe`
-   - `remotix-latest.json` → `{ "version": "1.0.1", "url": "/download/RemotixSetup.exe", "mandatory": false }`
+   Esto compila el exe, genera `RemotixHostSetup.exe` y **publica en `server/public`**:
+   - `RemotixHostSetup.exe`  → servido en `/download/RemotixHostSetup.exe`
+   - `remotix-latest.json` → `{ "version": "1.0.1", "url": "/download/RemotixHostSetup.exe", "mandatory": false }`
 
 2. Despliegas `server/public` en producción (parte de la imagen/deploy del server).
 

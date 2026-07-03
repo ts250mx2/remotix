@@ -1,6 +1,6 @@
 {
     "version":  "1.0.0",
-    "url":  "/download/RemotixSetup.exe",
+    "url":  "/download/RemotixHostSetup.exe",
     "notes":  "",
     "mandatory":  false
 }

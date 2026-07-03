@@ -16,7 +16,7 @@
   #define AppExe "..\..\agent\target\release\remotix-lite.exe"
 #endif
 
-#define AppName "Remotix"
+#define AppName "Remotix Host (desatendido)"
 #define AppPublisher "HL Sistemas"
 #define AppExeName "Remotix.exe"
 
@@ -32,7 +32,7 @@ DisableReadyPage=no
 UninstallDisplayName={#AppName}
 UninstallDisplayIcon={app}\{#AppExeName}
 OutputDir=Output
-OutputBaseFilename=RemotixSetup
+OutputBaseFilename=RemotixHostSetup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
