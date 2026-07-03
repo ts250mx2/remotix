@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, HttpError, type Device } from '../api/client';
 import { Layout } from '../components/Layout';
+import { DownloadButton } from '../components/DownloadButton';
 
 function fmtKey(k: string): string {
   return k.length === 9 ? `${k.slice(0, 3)}-${k.slice(3, 6)}-${k.slice(6)}` : k;
@@ -83,7 +84,6 @@ export function Devices() {
         <h2>Agregar una PC por clave</h2>
         <p className="muted small">
           Escribe la clave que muestra el programa Remotix en esa PC y quedará en tu cuenta.
-          ¿Aún no lo tienes instalado allí? <a href="/download/RemotixSetup.exe" download>Descarga el instalador de Remotix</a>.
         </p>
         <form className="row" onSubmit={addByKey}>
           <input
@@ -94,6 +94,9 @@ export function Devices() {
           <button type="submit" disabled={adding}>{adding ? 'Agregando…' : 'Agregar'}</button>
         </form>
         {error && <div className="error">{error}</div>}
+        <hr className="sep" />
+        <p className="muted small">¿Aún no tienes Remotix en esa PC? Instálalo y te dará su clave:</p>
+        <DownloadButton />
       </section>
 
       <section className="card">

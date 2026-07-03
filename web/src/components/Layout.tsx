@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { DownloadButton } from './DownloadButton';
 
 // Navegación del portal (menú lateral). `end` marca la ruta exacta (para que "/"
 // no quede activa en todas las subrutas).
@@ -61,6 +62,7 @@ export function Layout({
         </nav>
 
         <div className="sb-foot">
+          <DownloadButton label="Descargar Remotix" className="sb-download" />
           {user && (
             <>
               <div className="sb-user">

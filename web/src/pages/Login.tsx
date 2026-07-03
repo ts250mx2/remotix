@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { HttpError } from '../api/client';
+import { DownloadButton } from '../components/DownloadButton';
 
 export function Login() {
   const { login } = useAuth();
@@ -41,6 +42,14 @@ export function Login() {
         {err && <div className="error">{err}</div>}
         <button type="submit" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
         <p className="muted small">¿No tienes cuenta? <Link to="/register">Crea una</Link>.</p>
+
+        <hr className="sep" />
+        <div className="download-cta">
+          <p className="muted small">¿Quieres controlar un equipo en remoto? Instala Remotix en esa PC:</p>
+          <DownloadButton />
+          <p className="muted small">Gratis · Windows · lo instalas, te da una clave y ya te conectas.</p>
+        </div>
+
         <hr className="sep" />
         <p className="muted small helpdesk-links">
           ¿Soporte rápido sin cuenta? <Link to="/ayuda">Compartir mi pantalla</Link> · <Link to="/operador">Conectar a un equipo</Link>

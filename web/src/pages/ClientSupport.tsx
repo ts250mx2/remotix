@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { SupportConnection, errorText, type ChatMessage } from '../helpdesk/connection';
 import { ChatPanel } from '../helpdesk/ChatPanel';
 import { FilePanel, useFileTransfers } from '../helpdesk/FilePanel';
+import { DownloadButton } from '../components/DownloadButton';
 
 type Phase = 'form' | 'live';
 
@@ -90,11 +91,9 @@ export function ClientSupport() {
           <hr className="sep" />
           <p className="muted small">
             ¿El técnico necesita <strong>controlar</strong> tu equipo (mouse, teclado y archivos)?
-            Descarga Remotix, ábrelo y dile la <strong>clave</strong> que aparece. Sin instalación.
+            Instala Remotix, ábrelo y dile la <strong>clave</strong> que aparece.
           </p>
-          <a className="download-btn" href="/download/remotix.exe" download>
-            Descargar Remotix · control remoto (Windows)
-          </a>
+          <DownloadButton label="Descargar Remotix · control remoto (Windows)" />
         </form>
       </main>
     );
