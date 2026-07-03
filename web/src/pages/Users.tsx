@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, type User } from '../api/client';
-import { Topbar } from '../components/Topbar';
+import { Layout } from '../components/Layout';
 
 export function Users() {
   const [users, setUsers] = useState<User[] | null>(null);
@@ -10,11 +10,8 @@ export function Users() {
   }, []);
 
   return (
-    <>
-      <Topbar />
-      <main className="container">
+    <Layout title="Usuarios">
         <section className="card">
-          <h2>Usuarios</h2>
           <p className="muted small">
             Personas con cuenta. Para añadir a alguien, pídele que se registre en{' '}
             <a href="/register">/register</a>; luego podrás concederle acceso a tus PCs.
@@ -32,7 +29,6 @@ export function Users() {
             </ul>
           )}
         </section>
-      </main>
-    </>
+    </Layout>
   );
 }

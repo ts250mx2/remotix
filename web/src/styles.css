@@ -52,7 +52,8 @@ h2 { margin: 0 0 12px; font-size: 18px; }
   padding: 20px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 8px 24px -18px rgba(0, 0, 0, 0.7);
 }
 .card.narrow { width: min(380px, 92vw); }
 
@@ -124,7 +125,126 @@ button.danger:hover { background: rgba(226, 91, 91, 0.08); }
   letter-spacing: 0.05em;
 }
 
-/* Topbar */
+/* ---------------- Portal: shell con menú lateral ---------------- */
+.app-shell {
+  display: grid;
+  grid-template-columns: 244px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 14px;
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
+}
+
+.sb-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 6px 8px 16px;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+.sb-brand:hover { text-decoration: none; }
+.sb-logo {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), #8fc0ff);
+  box-shadow: 0 3px 10px rgba(74, 144, 226, 0.45);
+}
+.sb-logo::after {
+  content: '';
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ffd266;
+}
+
+.sb-nav { display: flex; flex-direction: column; gap: 2px; }
+.sb-link {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 14px;
+  transition: background 0.12s, color 0.12s;
+}
+.sb-link:hover { background: var(--surface); color: var(--fg); text-decoration: none; }
+.sb-link.active {
+  background: rgba(74, 144, 226, 0.14);
+  color: #d7e6fb;
+  font-weight: 500;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.sb-ico { width: 20px; text-align: center; font-size: 15px; }
+
+.sb-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.sb-user { display: flex; align-items: center; gap: 10px; padding: 2px 4px; min-width: 0; }
+.sb-avatar {
+  width: 32px; height: 32px; flex: none;
+  border-radius: 9px;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--accent), #6aa9f0);
+  color: #fff; font-size: 12px; font-weight: 700;
+}
+.sb-uname { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-logout { width: 100%; }
+
+.content {
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1120px;
+  width: 100%;
+}
+.content-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.content-head h1 { font-size: 24px; }
+.content-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+@media (max-width: 760px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar {
+    position: static; height: auto;
+    flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px;
+  }
+  .sb-brand { padding: 4px 8px; }
+  .sb-nav { flex-direction: row; flex-wrap: wrap; flex: 1; }
+  .sb-foot { margin-top: 0; border-top: none; padding-top: 0; flex-direction: row; align-items: center; }
+  .sb-logout { width: auto; }
+  .content { padding: 18px; }
+}
+
+/* Topbar (legacy) */
 .topbar {
   display: flex;
   align-items: center;
@@ -179,11 +299,24 @@ button.danger:hover { background: rgba(226, 91, 91, 0.08); }
 /* Equipos table */
 .equipos { width: 100%; border-collapse: collapse; }
 .equipos th, .equipos td {
-  text-align: left; padding: 10px 8px;
+  text-align: left; padding: 11px 10px;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
 }
-.equipos th { font-weight: 500; color: var(--muted); }
+.equipos th {
+  font-weight: 500; color: var(--muted2);
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.equipos tbody tr { transition: background 0.12s; }
+.equipos tbody tr:hover { background: var(--surface-2); }
+.equipos tbody tr:last-child td { border-bottom: none; }
+
+/* Acciones por fila (conectar + eliminar) */
+.row-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
+.iconbtn {
+  padding: 8px 10px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
 
 /* PIN reveal */
 .pin-reveal {

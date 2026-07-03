@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, HttpError, type Device, type DeviceGrant, type User } from '../api/client';
-import { Topbar } from '../components/Topbar';
+import { Layout } from '../components/Layout';
 
 interface Group { id: string; name: string; }
 
@@ -86,17 +86,15 @@ export function DeviceDetail() {
     await loadAll();
   }
 
-  if (error) return <><Topbar /><main className="container"><div className="error">{error}</div></main></>;
-  if (!device) return <><Topbar /><main className="container"><p className="muted">Cargando…</p></main></>;
+  if (error) return <Layout><div className="error">{error}</div></Layout>;
+  if (!device) return <Layout><p className="muted">Cargando…</p></Layout>;
 
   const isOwner = device.role === 'owner';
   const grantedGroupIds = new Set(grants.filter((g) => g.kind === 'group').map((g) => g.principalId));
   const availableGroups = groups.filter((g) => !grantedGroupIds.has(g.id));
 
   return (
-    <>
-      <Topbar />
-      <main className="container">
+    <Layout>
         <section className="project-header">
           <div>
             <h1>💻 {device.name}</h1>
@@ -160,7 +158,6 @@ export function DeviceDetail() {
             <p className="muted">Este equipo se comparte contigo. El dueño gestiona los accesos.</p>
           </section>
         )}
-      </main>
-    </>
+    </Layout>
   );
 }

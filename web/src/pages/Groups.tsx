@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, HttpError } from '../api/client';
-import { Topbar } from '../components/Topbar';
+import { Layout } from '../components/Layout';
 
 interface Group { id: string; name: string; }
 interface Member { userId: string; email: string | null; name: string | null; }
@@ -64,9 +64,7 @@ export function Groups() {
   }
 
   return (
-    <>
-      <Topbar />
-      <main className="container">
+    <Layout title="Grupos">
         <section className="card">
           <h2>Nuevo grupo</h2>
           <p className="muted small">Agrupa usuarios para darles acceso a varias PCs de una vez.</p>
@@ -118,7 +116,6 @@ export function Groups() {
             )}
           </section>
         </div>
-      </main>
-    </>
+    </Layout>
   );
 }
