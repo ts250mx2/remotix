@@ -103,14 +103,34 @@ pub async fn ensure_registered(server: &str, name: &str) {
     }
 }
 
-/// Bucle persistente: presencia + atención de solicitudes de conexión.
-pub async fn run_device(cfg: LiteConfig, name: String, ui: std::sync::mpsc::Sender<LiteEvent>) {
+/// Bucle persistente: presencia + atención de solicitudes de conexión. Si el
+/// servidor rechaza la autenticación (`auth_failed` —p. ej. su BD se recreó o el
+/// equipo fue borrado— ) se RE-REGISTRA solo, conservando el login, para no
+/// quedarse atascado en "Sin conexión" con credenciales muertas.
+pub async fn run_device(mut cfg: LiteConfig, name: String, ui: std::sync::mpsc::Sender<LiteEvent>) {
     let _ = ui.send(LiteEvent::Code(cfg.access_key.clone()));
     let busy = Arc::new(AtomicBool::new(false));
     loop {
         let _ = ui.send(LiteEvent::Status("Conectando al servidor…".into()));
-        if let Err(e) = connect_once(&cfg, &name, &ui, &busy).await {
-            warn!("device WS: {e}");
+        match connect_once(&cfg, &name, &ui, &busy).await {
+            Ok(()) => {}
+            Err(e) if e.to_string().contains("auth_failed") => {
+                warn!("device auth_failed: re-registrando este equipo");
+                let _ = ui.send(LiteEvent::Status("Re-registrando este equipo…".into()));
+                match register_device(&cfg.server, &name).await {
+                    Ok(mut newcfg) => {
+                        // Conserva el login del usuario tras el re-registro.
+                        newcfg.session_token = cfg.session_token.take();
+                        newcfg.user_email = cfg.user_email.take();
+                        newcfg.save();
+                        cfg = newcfg;
+                        let _ = ui.send(LiteEvent::Code(cfg.access_key.clone()));
+                        continue; // reconecta ya con las credenciales nuevas
+                    }
+                    Err(re) => warn!("re-registro falló: {re}"),
+                }
+            }
+            Err(e) => warn!("device WS: {e}"),
         }
         let _ = ui.send(LiteEvent::Status("Sin conexión. Reintentando…".into()));
         tokio::time::sleep(Duration::from_millis(2500)).await;
