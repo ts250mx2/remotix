@@ -55,13 +55,16 @@ fn run_tray(rx: Receiver<LiteEvent>) -> Result<()> {
     // Elementos informativos (deshabilitados): el host no es cerrable a mano.
     let status_item = MenuItem::new("Iniciando…", false, None);
     let key_item = MenuItem::new("Clave: —", false, None);
+    let ver_item = MenuItem::new(format!("Versión {}", crate::update::CURRENT_VERSION), false, None);
     menu.append(&status_item)?;
     menu.append(&PredefinedMenuItem::separator())?;
     menu.append(&key_item)?;
+    menu.append(&PredefinedMenuItem::separator())?;
+    menu.append(&ver_item)?;
 
     let _tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        .with_tooltip("Remotix — Acceso remoto")
+        .with_tooltip(format!("Remotix v{} — Acceso remoto", crate::update::CURRENT_VERSION))
         .with_icon(make_icon())
         .build()?;
 

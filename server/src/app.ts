@@ -11,6 +11,7 @@ import { turnRoutes } from './routes/turn.js';
 import { chatRoutes } from './routes/chat.js';
 import { deviceRoutes } from './routes/device.js';
 import { deviceManageRoutes } from './routes/devices.js';
+import { updateRoutes } from './routes/update.js';
 import { attachWebStatic, attachDownloads } from './static.js';
 import { env } from './env.js';
 
@@ -39,7 +40,8 @@ app
   .route('/api/turn-credentials', turnRoutes)
   .route('/api/chat', chatRoutes)
   .route('/api/device', deviceRoutes)
-  .route('/api/devices', deviceManageRoutes);
+  .route('/api/devices', deviceManageRoutes)
+  .route('/api/update', updateRoutes);   // /api/update/latest (auto-actualización del agente)
 
 // Descarga del agente (antes de la SPA, para que /download no caiga en el fallback).
 attachDownloads(app);

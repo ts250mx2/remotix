@@ -54,7 +54,7 @@ export function Devices() {
           ) : (
             <table className="equipos">
               <thead>
-                <tr><th>Nombre</th><th>Clave</th><th>Estado</th><th>Sistema</th><th>Acceso</th><th></th></tr>
+                <tr><th>Nombre</th><th>Clave</th><th>Estado</th><th>Sistema</th><th>Versión</th><th>Acceso</th><th></th></tr>
               </thead>
               <tbody>
                 {devices.map((d) => (
@@ -63,6 +63,7 @@ export function Devices() {
                     <td className="mono small">{fmtKey(d.accessKey)}</td>
                     <td><span className={`pcstate ${d.online ? 'on' : ''}`}>{d.online ? 'En línea' : 'Desconectado'}</span></td>
                     <td>{d.os ?? '—'}</td>
+                    <td className="mono small">{d.agentVersion ? `v${d.agentVersion}` : '—'}</td>
                     <td><span className="badge small">{d.role === 'owner' ? 'dueño' : 'compartido'}</span></td>
                     <td>
                       <button disabled={!d.online || busy === d.id} onClick={() => connect(d)}>

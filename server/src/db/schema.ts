@@ -46,6 +46,9 @@ export const devices = mysqlTable(
     machineId: varchar('machine_id', { length: 80 }),
     os: varchar('os', { length: 64 }),
     hostname: varchar('hostname', { length: 255 }),
+    // Versión del agente instalada, reportada en el `hello` del WS. Permite ver
+    // qué PC tiene qué versión y disparar la auto-actualización.
+    agentVersion: varchar('agent_version', { length: 32 }),
     lastSeenAt: ts('last_seen_at'),
     createdAt: ts('created_at').notNull(),
   },

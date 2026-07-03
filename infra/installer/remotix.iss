@@ -62,3 +62,24 @@ Filename: "{app}\{#AppExeName}"; Parameters: "uninstall"; \
 ; Limpia el log del servicio (no borra la identidad en HKLM: así reinstalar
 ; conserva la MISMA clave de acceso del equipo).
 Type: filesandordirs; Name: "{commonappdata}\Remotix"
+
+[Code]
+// En una ACTUALIZACIÓN el servicio está en marcha y bloquea Remotix.exe. Antes de
+// copiar los archivos (ssInstall) detenemos y eliminamos el servicio ejecutando el
+// exe ANTIGUO (que aún se puede lanzar aunque el archivo esté bloqueado para
+// escritura). Así el exe queda libre para reemplazarlo; luego [Run] lo reinstala.
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  Exe: String;
+begin
+  if CurStep = ssInstall then
+  begin
+    Exe := ExpandConstant('{app}\Remotix.exe');
+    if FileExists(Exe) then
+    begin
+      Exec(Exe, 'uninstall', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Sleep(1500);
+    end;
+  end;
+end;

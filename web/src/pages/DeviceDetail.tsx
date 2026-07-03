@@ -111,7 +111,7 @@ export function DeviceDetail() {
 
         <section className="card">
           <h2>Datos</h2>
-          <p className="muted small">Sistema: {device.os ?? '—'} · Host: {device.hostname ?? '—'}</p>
+          <p className="muted small">Sistema: {device.os ?? '—'} · Host: {device.hostname ?? '—'} · Versión: {device.agentVersion ? `v${device.agentVersion}` : '—'}</p>
           {isOwner && (
             <form className="row" onSubmit={rename}>
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre del equipo" />

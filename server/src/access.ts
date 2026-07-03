@@ -36,6 +36,7 @@ export interface AccessibleDevice {
   ownerId: string | null;
   os: string | null;
   hostname: string | null;
+  agentVersion: string | null;
   lastSeenAt: Date | null;
   createdAt: Date;
   role: 'owner' | 'granted';
@@ -66,6 +67,7 @@ export async function listAccessibleDevices(userId: string): Promise<AccessibleD
       ownerId: d.ownerId,
       os: d.os,
       hostname: d.hostname,
+      agentVersion: d.agentVersion,
       lastSeenAt: d.lastSeenAt,
       createdAt: d.createdAt,
       role: (d.ownerId === userId ? 'owner' : 'granted') as 'owner' | 'granted',

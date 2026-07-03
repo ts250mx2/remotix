@@ -125,7 +125,12 @@ async fn connect_once(
 ) -> anyhow::Result<()> {
     let (ws, _) = tokio_tungstenite::connect_async(cfg.ws_device_url()).await?;
     let (mut w, mut r) = ws.split();
-    w.send(Message::Text(serde_json::json!({ "type": "hello", "deviceId": cfg.device_id, "secret": cfg.secret }).to_string())).await?;
+    w.send(Message::Text(serde_json::json!({
+        "type": "hello",
+        "deviceId": cfg.device_id,
+        "secret": cfg.secret,
+        "version": crate::update::CURRENT_VERSION,
+    }).to_string())).await?;
 
     loop {
         match r.next().await {
@@ -137,6 +142,8 @@ async fn connect_once(
                     Some("start") => {
                         let code = m.get("code").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         if code.is_empty() || busy.swap(true, Ordering::SeqCst) { continue; }
+                        // Marca sesión activa: el servicio no auto-actualizará mientras dure.
+                        crate::update::set_session_active(true);
                         let signal = cfg.ws_signal_url();
                         let name = name.to_string();
                         let ui2 = ui.clone();
@@ -147,6 +154,7 @@ async fn connect_once(
                                 warn!("sesión: {e:#}");
                             }
                             busy2.store(false, Ordering::SeqCst);
+                            crate::update::set_session_active(false);
                             let _ = ui2.send(LiteEvent::Status("En línea · esperando al técnico".into()));
                         });
                     }

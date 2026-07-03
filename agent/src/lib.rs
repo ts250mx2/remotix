@@ -16,6 +16,7 @@ pub mod session;
 #[cfg(windows)]
 pub mod tray;
 pub mod ui;
+pub mod update;
 pub mod viewer;
 #[cfg(windows)]
 pub mod winsvc;

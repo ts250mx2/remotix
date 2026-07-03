@@ -39,6 +39,7 @@ export interface Equipo {
 export interface Device {
   id: string; accessKey: string; name: string; ownerId: string | null;
   os: string | null; hostname: string | null;
+  agentVersion: string | null;
   lastSeenAt: string | null; createdAt: string;
   role: 'owner' | 'granted'; online: boolean;
 }

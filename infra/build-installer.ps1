@@ -82,6 +82,27 @@ if ($Sign -and (Test-Path $setup)) {
     & (Join-Path $PSScriptRoot 'sign.ps1') -File $setup
 }
 
+# --- 6) Publicar en server/public: el instalador + el manifiesto de version ---
+# El servicio de cada equipo consulta /api/update/latest (que lee este manifiesto)
+# y descarga /download/RemotixSetup.exe para auto-actualizarse.
+$publicDir = Join-Path $root 'server\public'
+New-Item -ItemType Directory -Force -Path $publicDir | Out-Null
+Copy-Item $setup (Join-Path $publicDir 'RemotixSetup.exe') -Force
+$manifest = [ordered]@{
+    version   = $Version
+    url       = '/download/RemotixSetup.exe'
+    notes     = ''
+    mandatory = $false
+}
+# UTF-8 SIN BOM (Out-File -Encoding utf8 de PS 5.1 mete BOM y rompe JSON.parse en Node).
+$json = $manifest | ConvertTo-Json
+[System.IO.File]::WriteAllText(
+    (Join-Path $publicDir 'remotix-latest.json'),
+    $json,
+    (New-Object System.Text.UTF8Encoding($false))
+)
+Write-Host "Publicado en server\public: RemotixSetup.exe + remotix-latest.json (v$Version)" -ForegroundColor Green
+
 Write-Host "`nListo: $setup" -ForegroundColor Green
 Write-Host "Instalacion desatendida en el equipo remoto:  RemotixSetup.exe /VERYSILENT /SUPPRESSMSGBOXES" -ForegroundColor Green
 if (-not $Sign) {

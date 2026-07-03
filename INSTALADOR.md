@@ -80,6 +80,40 @@ El desinstalador detiene y elimina el servicio antes de borrar los archivos. La
 identidad/clave en `HKLM\SOFTWARE\Remotix` **no se borra** (para que reinstalar
 recupere la misma clave). Para eliminarla del todo, borra esa clave del registro.
 
+## Versión y auto-actualización
+
+El agente reporta su versión (la del `Cargo.toml`) al servidor en cada conexión;
+se guarda en la columna `agent_version` de la tabla `devices` y se ve en el panel
+web (columna **Versión** en «Mis PCs» y en el detalle de cada equipo).
+
+**Auto-actualización (automática y silenciosa):**
+
+1. Publicas una versión nueva:
+   ```powershell
+   # Sube la version en agent\Cargo.toml (p. ej. 1.0.1) y genera el instalador:
+   infra\build-installer.ps1 -Version 1.0.1
+   ```
+   Esto compila el exe, genera `RemotixSetup.exe` y **publica en `server/public`**:
+   - `RemotixSetup.exe`  → servido en `/download/RemotixSetup.exe`
+   - `remotix-latest.json` → `{ "version": "1.0.1", "url": "/download/RemotixSetup.exe", "mandatory": false }`
+
+2. Despliegas `server/public` en producción (parte de la imagen/deploy del server).
+
+3. Cada equipo, mediante su **servicio**, consulta `GET /api/update/latest` cada
+   ~30 min. Si su versión es más antigua:
+   - Si **no hay una sesión remota activa** (o el manifiesto marca `mandatory:true`),
+     descarga el instalador y lo aplica en silencio (el servicio lo ejecuta como
+     SYSTEM → **sin UAC**). El instalador detiene el servicio, reemplaza los
+     archivos y lo vuelve a arrancar.
+   - Si hay una sesión activa, **espera** a que termine para no cortarla.
+
+> `mandatory: true` en el manifiesto fuerza la actualización aunque haya sesión
+> activa (útil para parches urgentes).
+
+`Cargo.toml (version)` es la **única fuente de verdad** de la versión: pásale el
+mismo número a `-Version` (o deja que coincidan) para que agente y manifiesto
+concuerden.
+
 ## Comprobación y diagnóstico
 
 ```powershell

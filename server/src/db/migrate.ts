@@ -36,6 +36,7 @@ const STATEMENTS: string[] = [
     machine_id VARCHAR(80),
     os VARCHAR(64),
     hostname VARCHAR(255),
+    agent_version VARCHAR(32),
     last_seen_at DATETIME(3),
     created_at DATETIME(3) NOT NULL,
     FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE SET NULL
@@ -43,6 +44,7 @@ const STATEMENTS: string[] = [
 
   // Idempotente para bases ya creadas (se ignora si la columna/índice existen).
   `ALTER TABLE devices ADD COLUMN machine_id VARCHAR(80)`,
+  `ALTER TABLE devices ADD COLUMN agent_version VARCHAR(32)`,
   `CREATE INDEX devices_machine_idx ON devices(machine_id)`,
 
   `CREATE TABLE IF NOT EXISTS device_access (

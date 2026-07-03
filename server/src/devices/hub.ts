@@ -43,7 +43,12 @@ export function attachDeviceHub(server: Server): void {
         if (dev && (await verifySecret(String(msg.secret ?? ''), dev.secretHash))) {
           deviceId = dev.id;
           online.set(deviceId, ws);
-          await db.update(tables.devices).set({ lastSeenAt: new Date() }).where(eq(tables.devices.id, deviceId));
+          // El agente reporta su versión en el hello: la guardamos para saber qué
+          // PC tiene qué versión instalada (visible en el panel).
+          const version = typeof msg.version === 'string' ? msg.version.slice(0, 32) : null;
+          await db.update(tables.devices)
+            .set({ lastSeenAt: new Date(), ...(version ? { agentVersion: version } : {}) })
+            .where(eq(tables.devices.id, deviceId));
           ws.send(JSON.stringify({ type: 'ready', accessKey: dev.accessKey, name: dev.name }));
         } else {
           ws.send(JSON.stringify({ type: 'error', code: 'auth_failed' }));

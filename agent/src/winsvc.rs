@@ -227,6 +227,9 @@ fn run_service() -> Result<()> {
         ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN | ServiceControlAccept::SESSION_CHANGE,
     ))?;
 
+    // Permite que el ayudante (usuario) escriba el lock de sesión en ProgramData.
+    grant_state_dir_access();
+
     // Registro de identidad (HKLM) en segundo plano: la clave existe desde el
     // arranque, aunque nadie haya iniciado sesión.
     {
@@ -244,9 +247,12 @@ fn run_service() -> Result<()> {
         });
     }
 
-    // Bucle de seguimiento de sesión.
+    // Bucle de seguimiento de sesión + auto-actualización.
     let mut current: Option<Helper> = None;
     let mut last_session: u32 = INVALID_SESSION;
+    let mut ticks: u64 = 0;
+    const FIRST_UPDATE_CHECK: u64 = 20; // ~30 s tras arrancar
+    const UPDATE_EVERY: u64 = 1200; // ~30 min (bucle de 1.5 s)
 
     while !shutdown.load(Ordering::SeqCst) {
         let active = unsafe { WTSGetActiveConsoleSessionId() };
@@ -275,6 +281,11 @@ fn run_service() -> Result<()> {
             }
         }
 
+        if ticks == FIRST_UPDATE_CHECK || (ticks > FIRST_UPDATE_CHECK && ticks % UPDATE_EVERY == 0) {
+            maybe_auto_update();
+        }
+        ticks = ticks.wrapping_add(1);
+
         std::thread::sleep(Duration::from_millis(1500));
     }
 
@@ -285,6 +296,52 @@ fn run_service() -> Result<()> {
     status_handle.set_service_status(running(ServiceState::Stopped, ServiceControlAccept::empty()))?;
     log_line("=== servicio Remotix detenido ===");
     Ok(())
+}
+
+/// Concede a los usuarios permiso de modificación sobre %ProgramData%\Remotix,
+/// para que el ayudante (que corre como usuario) pueda escribir el lock de
+/// sesión que el servicio lee antes de auto-actualizar.
+fn grant_state_dir_access() {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let base = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".into());
+    let dir = std::path::Path::new(&base).join("Remotix");
+    let _ = std::fs::create_dir_all(&dir);
+    // *S-1-5-32-545 = BUILTIN\Users; (OI)(CI)M = herencia + modificación.
+    let _ = std::process::Command::new("icacls")
+        .arg(dir.as_os_str())
+        .args(["/grant", "*S-1-5-32-545:(OI)(CI)M", "/T", "/C", "/Q"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+}
+
+/// Comprueba si hay una versión más nueva y, si no hay sesión activa (o es
+/// obligatoria), la aplica. Bloquea unos segundos como mucho; se llama ~cada
+/// 30 min, así que el coste es despreciable.
+fn maybe_auto_update() {
+    let server = effective_server();
+    let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(rt) => rt,
+        Err(_) => return,
+    };
+    let info = match rt.block_on(crate::update::check_latest(&server)) {
+        Some(i) => i,
+        None => return, // ya estamos al día
+    };
+    if !info.mandatory && crate::update::session_active() {
+        log_line(&format!("actualización {} disponible; pospuesta (sesión activa)", info.version));
+        return;
+    }
+    log_line(&format!(
+        "aplicando actualización {} → {}",
+        crate::update::CURRENT_VERSION,
+        info.version
+    ));
+    if let Err(e) = rt.block_on(crate::update::download_and_apply(&server, &info.url)) {
+        log_line(&format!("fallo al aplicar actualización: {e:#}"));
+    }
+    // El instalador detendrá el servicio y lo reinstalará; el bucle terminará
+    // cuando llegue el Stop del SCM.
 }
 
 // ---------------------------------------------------------------------------
