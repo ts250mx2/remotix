@@ -9,6 +9,9 @@ dist/
 .vite/
 *.tsbuildinfo
 
+# Installer build output
+infra/installer/Output/
+
 # Logs
 *.log
 npm-debug.log*

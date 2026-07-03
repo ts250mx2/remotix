@@ -13,5 +13,9 @@ pub mod input;
 pub mod monitors;
 pub mod proto;
 pub mod session;
+#[cfg(windows)]
+pub mod tray;
 pub mod ui;
 pub mod viewer;
+#[cfg(windows)]
+pub mod winsvc;

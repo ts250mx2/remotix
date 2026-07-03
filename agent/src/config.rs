@@ -122,10 +122,9 @@ pub fn to_http(server: &str) -> String {
 // ---------------------------------------------------------------------------
 
 #[cfg(windows)]
-fn registry_load() -> Option<LiteConfig> {
-    use winreg::enums::HKEY_CURRENT_USER;
+fn reg_read(root: winreg::HKEY) -> Option<LiteConfig> {
     use winreg::RegKey;
-    let key = RegKey::predef(HKEY_CURRENT_USER).open_subkey("Software\\Remotix").ok()?;
+    let key = RegKey::predef(root).open_subkey("Software\\Remotix").ok()?;
     let device_id: String = key.get_value("device_id").ok()?;
     let access_key: String = key.get_value("access_key").ok()?;
     if device_id.is_empty() || access_key.is_empty() {
@@ -145,17 +144,35 @@ fn registry_load() -> Option<LiteConfig> {
     })
 }
 
+/// Carga la identidad del equipo. HKLM (máquina) tiene prioridad para que el
+/// servicio SYSTEM y el ayudante de usuario compartan la misma clave; si no,
+/// cae a HKCU (modo portátil / ejecución manual sin instalar).
+#[cfg(windows)]
+fn registry_load() -> Option<LiteConfig> {
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    reg_read(HKEY_LOCAL_MACHINE).or_else(|| reg_read(HKEY_CURRENT_USER))
+}
+
+#[cfg(windows)]
+fn reg_write(root: winreg::HKEY, c: &LiteConfig) -> std::io::Result<()> {
+    use winreg::RegKey;
+    let (key, _) = RegKey::predef(root).create_subkey("Software\\Remotix")?;
+    key.set_value("server", &c.server)?;
+    key.set_value("device_id", &c.device_id)?;
+    key.set_value("access_key", &c.access_key)?;
+    key.set_value("secret", &c.secret)?;
+    key.set_value("session_token", &c.session_token.clone().unwrap_or_default())?;
+    key.set_value("user_email", &c.user_email.clone().unwrap_or_default())?;
+    Ok(())
+}
+
+/// Persiste durablemente. Intenta HKLM (compartida entre servicio y ayudante);
+/// si no hay permisos —usuario normal sin elevar— cae a HKCU.
 #[cfg(windows)]
 fn registry_save(c: &LiteConfig) {
-    use winreg::enums::HKEY_CURRENT_USER;
-    use winreg::RegKey;
-    if let Ok((key, _)) = RegKey::predef(HKEY_CURRENT_USER).create_subkey("Software\\Remotix") {
-        let _ = key.set_value("server", &c.server);
-        let _ = key.set_value("device_id", &c.device_id);
-        let _ = key.set_value("access_key", &c.access_key);
-        let _ = key.set_value("secret", &c.secret);
-        let _ = key.set_value("session_token", &c.session_token.clone().unwrap_or_default());
-        let _ = key.set_value("user_email", &c.user_email.clone().unwrap_or_default());
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    if reg_write(HKEY_LOCAL_MACHINE, c).is_err() {
+        let _ = reg_write(HKEY_CURRENT_USER, c);
     }
 }
 

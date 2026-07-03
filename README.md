@@ -150,4 +150,5 @@ arriba) y `node server/agent-handshake-test.mjs <CODE>` (con un agente hosteando
 | 4 | Despliegue internet (HTTPS + TURN) | ✅ (config) |
 | 5 | Empaquetado del agente (firmado-ready) | ✅ |
 | 6 | Transferencia de archivos bidireccional (ambos modos) | ✅ |
-| — | Siguiente: MSI, servicio Windows, multi-monitor, agentes desatendidos, tuning de bitrate/FPS | ⏳ |
+| 7 | Instalador (Inno Setup) + servicio de Windows desatendido en el boot — ver [INSTALADOR.md](INSTALADOR.md) | ✅ |
+| — | Siguiente: MSI/GPO, multi-monitor avanzado, tuning de bitrate/FPS | ⏳ |

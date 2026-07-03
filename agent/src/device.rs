@@ -62,6 +62,47 @@ pub async fn run_lite_unattended(server: String, name: String, ui: std::sync::mp
     run_device(cfg, name, ui).await;
 }
 
+/// Ayudante lanzado por el servicio de Windows en la sesión interactiva: NO
+/// registra ni toca el autoarranque (de eso se encarga el servicio); solo carga
+/// la identidad ya persistida en HKLM y hospeda las sesiones. Si aún no existe
+/// (el servicio la está registrando), espera y reintenta.
+pub async fn run_helper_device(server: String, name: String, ui: std::sync::mpsc::Sender<LiteEvent>) {
+    let _ = server; // el servidor efectivo sale de la config guardada.
+    let cfg = loop {
+        if let Some(c) = LiteConfig::load() {
+            break c;
+        }
+        let _ = ui.send(LiteEvent::Status("Registrando este equipo…".into()));
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    };
+    run_device(cfg, name, ui).await;
+}
+
+/// Garantiza que el equipo esté registrado y su identidad persistida en HKLM.
+/// La invoca el servicio (SYSTEM) al arrancar, para que la clave exista desde el
+/// boot —incluso antes de que nadie inicie sesión—. Reintenta hasta lograrlo.
+pub async fn ensure_registered(server: &str, name: &str) {
+    if LiteConfig::load().is_some() {
+        return;
+    }
+    loop {
+        if LiteConfig::load().is_some() {
+            return;
+        }
+        match register_device(server, name).await {
+            Ok(c) => {
+                c.save(); // SYSTEM escribe en HKLM (compartida con el ayudante)
+                info!("dispositivo registrado por el servicio: clave {}", c.access_key);
+                return;
+            }
+            Err(e) => {
+                warn!("registro (servicio) falló: {e}. Reintentando…");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
+}
+
 /// Bucle persistente: presencia + atención de solicitudes de conexión.
 pub async fn run_device(cfg: LiteConfig, name: String, ui: std::sync::mpsc::Sender<LiteEvent>) {
     let _ = ui.send(LiteEvent::Code(cfg.access_key.clone()));

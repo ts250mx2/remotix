@@ -15,6 +15,9 @@ use remotix_agent::config::LiteConfig;
 use remotix_agent::device::run_lite_unattended;
 use remotix_agent::session::LiteEvent;
 
+/// Subcomandos reservados: nunca deben confundirse con una URL de servidor.
+const SUBCOMMANDS: &[&str] = &["console", "helper", "service", "install", "uninstall"];
+
 fn server() -> String {
     let baked = option_env!("REMOTIX_DEFAULT_SERVER").unwrap_or("ws://localhost:8080");
     // Si ya está registrado, respeta el servidor guardado.
@@ -23,7 +26,11 @@ fn server() -> String {
     }
     std::env::var("REMOTIX_SERVER")
         .ok()
-        .or_else(|| std::env::args().skip(1).find(|a| *a != "console"))
+        .or_else(|| {
+            std::env::args()
+                .skip(1)
+                .find(|a| !SUBCOMMANDS.contains(&a.as_str()))
+        })
         .unwrap_or_else(|| baked.to_string())
 }
 
@@ -34,6 +41,21 @@ fn main() -> Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,remotix_agent=info")),
         )
         .init();
+
+    // Subcomandos del modo desatendido (servicio de Windows + ayudante).
+    #[cfg(windows)]
+    {
+        match std::env::args().nth(1).as_deref() {
+            Some("service") => return remotix_agent::winsvc::run(), // lo arranca el SCM
+            Some("install") => return remotix_agent::winsvc::install(),
+            Some("uninstall") => return remotix_agent::winsvc::uninstall(),
+            Some("helper") => {
+                let name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Equipo".into());
+                return remotix_agent::tray::run_helper(server(), name);
+            }
+            _ => {}
+        }
+    }
 
     let console = std::env::args().any(|a| a == "console");
     let server = server();
