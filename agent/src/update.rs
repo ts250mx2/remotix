@@ -51,9 +51,20 @@ pub fn version_is_newer(latest: &str, current: &str) -> bool {
     false
 }
 
-/// Consulta la última versión publicada. Devuelve Some solo si hay una MÁS NUEVA.
+/// Consulta la última versión publicada de la APP. Devuelve Some solo si hay
+/// una MÁS NUEVA.
 pub async fn check_latest(server: &str) -> Option<UpdateInfo> {
-    let url = format!("{}/api/update/latest", crate::config::to_http(server));
+    check_channel(server, "app").await
+}
+
+/// Igual, pero del canal HOST (instalación con servicio de Windows). Manifiesto
+/// separado para que un host jamás se "actualice" con el instalador de la app.
+pub async fn check_latest_host(server: &str) -> Option<UpdateInfo> {
+    check_channel(server, "host").await
+}
+
+async fn check_channel(server: &str, channel: &str) -> Option<UpdateInfo> {
+    let url = format!("{}/api/update/latest?channel={channel}", crate::config::to_http(server));
     let client = reqwest::Client::builder().timeout(Duration::from_secs(20)).build().ok()?;
     let info: UpdateInfo = client.get(&url).send().await.ok()?.json().await.ok()?;
     version_is_newer(&info.version, CURRENT_VERSION).then_some(info)

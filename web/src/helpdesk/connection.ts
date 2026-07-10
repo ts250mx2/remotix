@@ -320,8 +320,9 @@ export class SupportConnection {
         break;
 
       case 'waiting':
-        // (operador) sala reservada desde el chat: el usuario aún no acepta.
-        this.handlers.onStatus?.('Esperando que el usuario acepte compartir su pantalla…');
+        // (operador) sala reservada: el equipo se une solo al recibir el `start`
+        // (sin intervención del usuario); esto es solo el instante intermedio.
+        this.handlers.onStatus?.('Conectando con el equipo…');
         break;
 
       case 'peer-left':

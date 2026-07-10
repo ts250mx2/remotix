@@ -12,7 +12,9 @@ pub fn set_autostart(enabled: bool) -> anyhow::Result<()> {
     let (run, _) = RegKey::predef(HKEY_CURRENT_USER).create_subkey(RUN_KEY)?;
     if enabled {
         let exe = std::env::current_exe()?;
-        run.set_value(VALUE, &exe.to_string_lossy().to_string())?;
+        // --tray: al iniciar sesión en Windows arranca oculto en la bandeja
+        // (accesible por su clave), sin plantar la ventana en el escritorio.
+        run.set_value(VALUE, &format!("\"{}\" --tray", exe.to_string_lossy()))?;
     } else {
         let _ = run.delete_value(VALUE);
     }

@@ -1,6 +1,6 @@
 [package]
 name = "remotix-agent"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 description = "Remotix Windows agent — pantalla + control remoto vía WebRTC"
 license = "Proprietary"
@@ -70,6 +70,7 @@ winreg = "0.52"
 windows-service = "0.7"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_System_Threading",

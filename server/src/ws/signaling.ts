@@ -41,6 +41,9 @@ interface ConnMeta {
 
 const SESSIONS = new Map<string, Session>();
 const CONNS = new WeakMap<WebSocket, ConnMeta>();
+// Sockets vivos de /ws/signal (para el barrido de keepalive) y su estado de pong.
+const ALL_CONNS = new Set<WebSocket>();
+const alive = new WeakMap<WebSocket, boolean>();
 
 // Alfabeto sin caracteres ambiguos (0/O, 1/I/L) para que sea fácil de dictar.
 const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
@@ -102,6 +105,8 @@ export function attachSignaling(server: Server): void {
   });
 
   wss.on('connection', (ws: WebSocket) => {
+    alive.set(ws, true);
+    ws.on('pong', () => alive.set(ws, true));
     ws.on('message', (data) => {
       let msg: Record<string, unknown>;
       try {
@@ -114,7 +119,20 @@ export function attachSignaling(server: Server): void {
 
     ws.on('close', () => handleClose(ws));
     ws.on('error', () => handleClose(ws));
+
+    ALL_CONNS.add(ws);
+    ws.on('close', () => ALL_CONNS.delete(ws));
   });
+
+  // Keepalive: mata sockets zombis (PC suspendida, red caída) para que el peer
+  // reciba 'peer-left' en vez de esperar para siempre.
+  setInterval(() => {
+    for (const ws of ALL_CONNS) {
+      if (alive.get(ws) === false) { ws.terminate(); continue; }
+      alive.set(ws, false);
+      ws.ping();
+    }
+  }, 30_000).unref();
 
   // Barrida periódica de salas abandonadas.
   setInterval(() => {
@@ -138,10 +156,14 @@ function handleMessage(ws: WebSocket, msg: Record<string, unknown>): void {
     if (CONNS.has(ws)) return send(ws, { t: 'error', code: 'already_in_session' });
 
     // Si el técnico lanzó la sesión desde el chat, viene un código reservado:
-    // el PC se ADJUNTA a esa sala en vez de crear una nueva.
+    // el PC se ADJUNTA a esa sala en vez de crear una nueva. Como el `start` se
+    // difunde a TODOS los procesos del equipo, solo el primero se adjunta; a los
+    // demás (o si la sala expiró) se les responde 'taken' para que se retiren —
+    // antes caían al caso general y hospedaban una sala fantasma para siempre.
     const wanted = typeof msg.code === 'string' ? msg.code.trim().toUpperCase() : '';
-    const reserved = wanted ? SESSIONS.get(wanted) : undefined;
-    if (reserved && !reserved.client) {
+    if (wanted) {
+      const reserved = SESSIONS.get(wanted);
+      if (!reserved || reserved.client) return send(ws, { t: 'error', code: 'taken' });
       reserved.client = ws;
       if (typeof msg.name === 'string') reserved.name = msg.name.slice(0, 120);
       if (typeof msg.issue === 'string') reserved.issue = msg.issue.slice(0, 1000);

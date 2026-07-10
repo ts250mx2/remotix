@@ -3,6 +3,26 @@
 Runbook para desplegar una versión nueva en el VPS (modo **híbrido**: Docker para
 `server` + `coturn`, detrás del **Nginx propio** del VPS, base de datos **MySQL**).
 
+## Publicar una versión nueva de la APP (auto-actualización de la flota)
+
+1. Sube `version` en `agent/Cargo.toml` (única fuente de verdad).
+2. `infra\build-app-installer.ps1 -Version X.Y.Z [-Sign]` — compila, genera
+   `RemotixSetup.exe` y publica exe + manifiesto en `server/public`.
+3. Commit + push, y en el VPS los pasos de abajo (git pull + rebuild del server).
+
+Al arrancar el server nuevo, **avisa por WebSocket a todos los equipos
+conectados** (y a los que se reconecten, y cada 10 min a los rezagados). Cada
+Remotix con versión vieja:
+- **inactivo** (en la bandeja, sin sesión remota ni visor) → se actualiza SOLO
+  en silencio y se relanza oculto (`--tray`);
+- **en uso** → muestra la tarjeta "Actualizar ahora" y se auto-aplica en cuanto
+  queda inactivo.
+- `"mandatory": true` en `server/public/remotix-latest.json` → se aplica aunque
+  la ventana esté visible (nunca a mitad de una sesión remota).
+
+La instalación con **servicio de Windows** (RemotixHostSetup) usa el canal
+separado `remotix-host-latest.json`; si ese manifiesto no existe, no se toca.
+
 > ⚠️ Desde la versión TeamViewer, el server usa **MySQL** (ya no SQLite). Asegúrate
 > de tener las variables `MYSQL_*` en el `.env` o el server **no arrancará**.
 

@@ -64,7 +64,7 @@ pub fn self_test() -> Result<()> {
     let display = Display::primary()?;
     let mut capturer = Capturer::new(display)?;
     let (cap_w, cap_h) = (capturer.width(), capturer.height());
-    let mut encoder = H264Encoder::new(cap_w, cap_h)?;
+    let mut encoder = H264Encoder::new(cap_w, cap_h, 20)?;
     info!("self-test: monitor {cap_w}x{cap_h}");
 
     for attempt in 0..200 {
@@ -92,7 +92,13 @@ pub fn self_test() -> Result<()> {
 
 /// Arranca captura + codificación + envío al `track`. Devuelve un handle que,
 /// al hacer `stop()` o al soltarse (Drop), detiene el hilo de captura.
-pub fn start(track: Arc<TrackLocalStaticSample>, fps: u32, selected: Arc<AtomicUsize>) -> CaptureHandle {
+/// `force_idr`: al ponerse en true (PLI del visor), el siguiente frame sale IDR.
+pub fn start(
+    track: Arc<TrackLocalStaticSample>,
+    fps: u32,
+    selected: Arc<AtomicUsize>,
+    force_idr: Arc<AtomicBool>,
+) -> CaptureHandle {
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = stop.clone();
     let (tx, mut rx) = mpsc::channel::<(Bytes, Duration)>(4);
@@ -100,7 +106,7 @@ pub fn start(track: Arc<TrackLocalStaticSample>, fps: u32, selected: Arc<AtomicU
     std::thread::Builder::new()
         .name("screen-capture".into())
         .spawn(move || {
-            if let Err(e) = capture_loop(tx, stop_thread, fps, selected) {
+            if let Err(e) = capture_loop(tx, stop_thread, fps, selected, force_idr) {
                 error!("captura terminó con error: {e:#}");
             }
         })
@@ -127,6 +133,7 @@ fn capture_loop(
     stop: Arc<AtomicBool>,
     fps: u32,
     selected: Arc<AtomicUsize>,
+    force_idr: Arc<AtomicBool>,
 ) -> Result<()> {
     let frame_dur = Duration::from_millis(1000 / fps.max(1) as u64);
     let mut cur_idx = usize::MAX;
@@ -144,7 +151,7 @@ fn capture_loop(
             match open_display(want) {
                 Ok(cap) => {
                     cap_h = cap.height();
-                    match H264Encoder::new(cap.width(), cap.height()) {
+                    match H264Encoder::new(cap.width(), cap.height(), fps) {
                         Ok(enc) => {
                             let (ew, eh) = enc.dims();
                             info!("captura monitor {want}: {}x{} → H.264 {}x{} @ {} fps", cap.width(), cap.height(), ew, eh, fps);
@@ -162,6 +169,9 @@ fn capture_loop(
         let tick = Instant::now();
         let cap = capturer.as_mut().unwrap();
         let enc = encoder.as_mut().unwrap();
+        if force_idr.swap(false, Ordering::SeqCst) {
+            enc.force_keyframe();
+        }
         match cap.frame() {
             Ok(frame) => {
                 let stride = frame.len() / cap_h.max(1);

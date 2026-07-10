@@ -399,7 +399,9 @@ pub async fn run_viewer_session(
                 let incoming: Incoming = match serde_json::from_str(&text) { Ok(v) => v, Err(_) => continue };
                 match incoming {
                     Incoming::Joined { .. } => shared.set_status("Equipo encontrado, negociando…"),
-                    Incoming::Waiting => shared.set_status("Esperando a que el equipo acepte…"),
+                    // El equipo se une SOLO al recibir el `start` (sin intervención
+                    // de nadie); esto solo es el instante entre reservar y unirse.
+                    Incoming::Waiting => shared.set_status("Conectando con el equipo…"),
                     Incoming::Signal { payload } => handle_signal(&pc, payload, &out_tx, &mut remote_set, &mut pending).await,
                     Incoming::PeerLeft => { shared.set_status("El equipo cerró la sesión."); break; }
                     Incoming::Error { code } => { shared.set_status(format!("Error: {code}")); break; }

@@ -38,6 +38,9 @@ WizardStyle=modern
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+; Reemplazo en sitio: cierra la app en ejecución para poder sobrescribir el exe.
+CloseApplications=yes
+RestartApplications=no
 
 [Languages]
 Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
@@ -53,4 +56,18 @@ Name: "{autoprograms}\Remotix"; Filename: "{app}\{#AppExeName}"
 Name: "{autodesktop}\Remotix"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
+; Interactivo: casilla "Iniciar Remotix" en la última página del asistente.
 Filename: "{app}\{#AppExeName}"; Description: "Iniciar Remotix ahora"; Flags: nowait postinstall skipifsilent
+; Silencioso (auto-actualización): relanza la app oculta en la bandeja (--tray)
+; para no plantar la ventana de repente sobre lo que el usuario esté haciendo.
+Filename: "{app}\{#AppExeName}"; Parameters: "--tray"; Flags: nowait; Check: WizardSilent
+
+[Code]
+// Antes de copiar, cierra cualquier Remotix.exe en ejecución (incl. el que lanza
+// su propia auto-actualización) para poder reemplazar el exe sin bloqueos.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var ResultCode: Integer;
+begin
+  Exec('taskkill.exe', '/F /IM Remotix.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
+end;

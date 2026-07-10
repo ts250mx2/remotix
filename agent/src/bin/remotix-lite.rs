@@ -69,6 +69,7 @@ fn main() -> Result<()> {
                 match ev {
                     LiteEvent::Code(c) => println!("CODE {c}"),
                     LiteEvent::Status(s) => println!("STATUS {s}"),
+                    LiteEvent::UpdateAvailable => println!("UPDATE available"),
                 }
             }
         });
@@ -115,6 +116,7 @@ impl eframe::App for LiteApp {
             match ev {
                 LiteEvent::Code(c) => self.code = Some(c),
                 LiteEvent::Status(s) => self.status = s,
+                LiteEvent::UpdateAvailable => {} // el servicio (canal host) actualiza
             }
         }
         egui::CentralPanel::default().show(ctx, |ui| {

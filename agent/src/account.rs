@@ -71,16 +71,24 @@ impl Account {
         Ok(r.user)
     }
 
-    /// Valida un token persistido. Devuelve el usuario si la sesión sigue viva.
-    pub async fn me(&self) -> Result<UserInfo> {
+    /// Valida un token persistido. `Ok(Some)` = sesión viva; `Ok(None)` = el
+    /// servidor la RECHAZÓ (401/403: borrar el token); `Err` = fallo de red u
+    /// otro error transitorio (NO borrar el token: arrancar sin internet no
+    /// debe desloguear al usuario).
+    pub async fn me(&self) -> Result<Option<UserInfo>> {
         let url = format!("{}/api/auth/me", self.base);
         let mut req = self.http.get(&url);
         if let Some(c) = self.cookie() { req = req.header(reqwest::header::COOKIE, c); }
         let resp = req.send().await?;
-        if !resp.status().is_success() { return Err(anyhow!("sesión expirada")); }
-        #[derive(Deserialize)]
-        struct R { user: UserInfo }
-        Ok(resp.json::<R>().await?.user)
+        match resp.status().as_u16() {
+            401 | 403 => Ok(None),
+            s if !(200..300).contains(&s) => Err(anyhow!("respuesta inesperada ({s})")),
+            _ => {
+                #[derive(Deserialize)]
+                struct R { user: UserInfo }
+                Ok(Some(resp.json::<R>().await?.user))
+            }
+        }
     }
 
     /// Reclama este equipo (por su clave fija) para el usuario logueado.

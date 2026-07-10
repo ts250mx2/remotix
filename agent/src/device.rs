@@ -157,8 +157,11 @@ async fn connect_once(
             Some(Ok(Message::Text(text))) => {
                 let m: serde_json::Value = match serde_json::from_str(&text) { Ok(v) => v, Err(_) => continue };
                 match m.get("type").and_then(|v| v.as_str()) {
-                    Some("ready") => { let _ = ui.send(LiteEvent::Status("En línea · esperando al técnico".into())); }
+                    Some("ready") => { let _ = ui.send(LiteEvent::Status("En línea · listo para recibir conexiones".into())); }
                     Some("error") => { warn!("device auth: {text}"); anyhow::bail!("auth_failed"); }
+                    // Push del servidor: hay versión nueva publicada. La GUI (o el
+                    // servicio, según el binario) decide cuándo aplicarla.
+                    Some("update") => { let _ = ui.send(LiteEvent::UpdateAvailable); }
                     Some("start") => {
                         let code = m.get("code").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         if code.is_empty() || busy.swap(true, Ordering::SeqCst) { continue; }
@@ -175,7 +178,7 @@ async fn connect_once(
                             }
                             busy2.store(false, Ordering::SeqCst);
                             crate::update::set_session_active(false);
-                            let _ = ui2.send(LiteEvent::Status("En línea · esperando al técnico".into()));
+                            let _ = ui2.send(LiteEvent::Status("En línea · listo para recibir conexiones".into()));
                         });
                     }
                     _ => {}

@@ -324,9 +324,9 @@ fn maybe_auto_update() {
         Ok(rt) => rt,
         Err(_) => return,
     };
-    let info = match rt.block_on(crate::update::check_latest(&server)) {
+    let info = match rt.block_on(crate::update::check_latest_host(&server)) {
         Some(i) => i,
-        None => return, // ya estamos al día
+        None => return, // ya estamos al día (o no hay manifiesto del canal host)
     };
     if !info.mandatory && crate::update::session_active() {
         log_line(&format!("actualización {} disponible; pospuesta (sesión activa)", info.version));

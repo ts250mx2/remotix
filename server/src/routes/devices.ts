@@ -153,6 +153,8 @@ export const deviceManageRoutes = new Hono()
     if (!deviceHub.isOnline(deviceId)) return c.json({ error: 'offline' }, 409);
     const dev = (await db.select().from(tables.devices).where(eq(tables.devices.id, deviceId)))[0];
     const code = reserveRemoteSession({ name: dev.name });
-    deviceHub.sendToDevice(deviceId, { type: 'start', code });
+    if (!deviceHub.sendToDevice(deviceId, { type: 'start', code })) {
+      return c.json({ error: 'offline' }, 409);
+    }
     return c.json({ code, name: dev.name });
   });

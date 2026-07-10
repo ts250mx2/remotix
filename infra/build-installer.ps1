@@ -84,26 +84,22 @@ if ($Sign -and (Test-Path $setup)) {
     & (Join-Path $PSScriptRoot 'sign.ps1') -File $setup
 }
 
-# --- 6) Publicar en server/public: el instalador + el manifiesto de version ---
-# El servicio de cada equipo consulta /api/update/latest (que lee este manifiesto)
-# y descarga /download/RemotixHostSetup.exe para auto-actualizarse.
+# --- 6) Publicar el instalador del host + su manifiesto (canal host) ---
+# El canal de auto-actualización del HOST es remotix-host-latest.json (lo lee el
+# servicio vía /api/update/latest?channel=host). Es un manifiesto SEPARADO del
+# de la app (remotix-latest.json, que escribe build-app-installer.ps1) para que
+# un host jamás se "actualice" con el instalador de la app ni al revés.
 $publicDir = Join-Path $root 'server\public'
 New-Item -ItemType Directory -Force -Path $publicDir | Out-Null
 Copy-Item $setup (Join-Path $publicDir 'RemotixHostSetup.exe') -Force
-$manifest = [ordered]@{
-    version   = $Version
-    url       = '/download/RemotixHostSetup.exe'
-    notes     = ''
-    mandatory = $false
-}
+$manifest = [ordered]@{ version = $Version; url = '/download/RemotixHostSetup.exe'; notes = ''; mandatory = $false }
 # UTF-8 SIN BOM (Out-File -Encoding utf8 de PS 5.1 mete BOM y rompe JSON.parse en Node).
-$json = $manifest | ConvertTo-Json
 [System.IO.File]::WriteAllText(
-    (Join-Path $publicDir 'remotix-latest.json'),
-    $json,
+    (Join-Path $publicDir 'remotix-host-latest.json'),
+    ($manifest | ConvertTo-Json),
     (New-Object System.Text.UTF8Encoding($false))
 )
-Write-Host "Publicado en server\public: RemotixHostSetup.exe + remotix-latest.json (v$Version)" -ForegroundColor Green
+Write-Host "Publicado en server\public: RemotixHostSetup.exe + remotix-host-latest.json (v$Version)" -ForegroundColor Green
 
 Write-Host "`nListo: $setup" -ForegroundColor Green
 Write-Host "Instalacion desatendida en el equipo remoto:  RemotixHostSetup.exe /VERYSILENT /SUPPRESSMSGBOXES" -ForegroundColor Green

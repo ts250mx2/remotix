@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn roundtrip_encode_decode() {
         let (w, h) = (320usize, 240usize);
-        let mut enc = H264Encoder::new(w, h).unwrap();
+        let mut enc = H264Encoder::new(w, h, 20).unwrap();
         let mut dec = H264Decoder::new().unwrap();
         let frames = 30usize;
         let mut decoded = 0usize;

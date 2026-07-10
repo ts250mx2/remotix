@@ -2,7 +2,7 @@
 //! (reservado por el técnico desde el chat), comparte pantalla por WebRTC y
 //! recibe input. Termina cuando el técnico se desconecta.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -38,6 +38,8 @@ const TARGET_FPS: u32 = 20;
 pub enum LiteEvent {
     Code(String),
     Status(String),
+    /// El servidor avisó (push por /ws/device) que hay una versión más nueva.
+    UpdateAvailable,
 }
 
 /// Sesión estilo TeamViewer QuickSupport: hospeda SIN código (el server genera
@@ -45,6 +47,7 @@ pub enum LiteEvent {
 /// sigue activa entre conexiones (la clave no cambia hasta cerrar).
 pub async fn run_lite_session(signal_ws_url: &str, name: &str, ui: std::sync::mpsc::Sender<LiteEvent>) -> Result<()> {
     let selected = Arc::new(AtomicUsize::new(0));
+    let force_idr = Arc::new(AtomicBool::new(false));
     let (iw, ih) = capture::monitor_dims(0).unwrap_or((1920, 1080));
     let monitor_rect: input::MonitorRect = Arc::new(Mutex::new(crate::monitors::rect_for(0, iw, ih)));
     let input_tx = input::spawn_injector(monitor_rect.clone());
@@ -85,7 +88,7 @@ pub async fn run_lite_session(signal_ws_url: &str, name: &str, ui: std::sync::mp
                     }
                     Incoming::PeerJoined => {
                         let _ = ui.send(LiteEvent::Status("Técnico conectándose…".into()));
-                        match build_peer(&ice_servers, &out_tx, &state_tx, &input_tx, selected.clone(), monitor_rect.clone()).await {
+                        match build_peer(&ice_servers, &out_tx, &state_tx, &input_tx, selected.clone(), monitor_rect.clone(), force_idr.clone()).await {
                             Ok((new_pc, new_track, dc)) => {
                                 if let Ok(offer) = new_pc.create_offer(None).await {
                                     if new_pc.set_local_description(offer.clone()).await.is_ok() {
@@ -114,7 +117,7 @@ pub async fn run_lite_session(signal_ws_url: &str, name: &str, ui: std::sync::mp
                 match state {
                     RTCPeerConnectionState::Connected => {
                         if capture_handle.is_none() {
-                            if let Some(t) = track.clone() { capture_handle = Some(capture::start(t, TARGET_FPS, selected.clone())); }
+                            if let Some(t) = track.clone() { capture_handle = Some(capture::start(t, TARGET_FPS, selected.clone(), force_idr.clone())); }
                         }
                         let _ = ui.send(LiteEvent::Status("Conectado · compartiendo tu pantalla".into()));
                     }
@@ -137,6 +140,7 @@ pub async fn run_lite_session(signal_ws_url: &str, name: &str, ui: std::sync::mp
 /// técnico se desconecta (peer-left) o se cierra la conexión.
 pub async fn run_remote_session(signal_ws_url: &str, name: &str, code: &str) -> Result<()> {
     let selected = Arc::new(AtomicUsize::new(0));
+    let force_idr = Arc::new(AtomicBool::new(false));
     let (iw, ih) = capture::monitor_dims(0).unwrap_or((1920, 1080));
     let monitor_rect: input::MonitorRect = Arc::new(Mutex::new(crate::monitors::rect_for(0, iw, ih)));
     let input_tx = input::spawn_injector(monitor_rect.clone());
@@ -183,7 +187,7 @@ pub async fn run_remote_session(signal_ws_url: &str, name: &str, code: &str) -> 
                 match incoming {
                     Incoming::Hosted { ice_servers: ice, .. } => { ice_servers = ice; }
                     Incoming::PeerJoined => {
-                        match build_peer(&ice_servers, &out_tx, &state_tx, &input_tx, selected.clone(), monitor_rect.clone()).await {
+                        match build_peer(&ice_servers, &out_tx, &state_tx, &input_tx, selected.clone(), monitor_rect.clone(), force_idr.clone()).await {
                             Ok((new_pc, new_track, dc)) => {
                                 if let Ok(offer) = new_pc.create_offer(None).await {
                                     if new_pc.set_local_description(offer.clone()).await.is_ok() {
@@ -198,7 +202,9 @@ pub async fn run_remote_session(signal_ws_url: &str, name: &str, code: &str) -> 
                     }
                     Incoming::Signal { payload } => { if let Some(p) = pc.as_ref() { handle_signal(p, payload).await; } }
                     Incoming::PeerLeft => { info!("técnico desconectado, fin de sesión"); break; }
-                    Incoming::Error { code } => { warn!("signal error: {code}"); }
+                    // p. ej. 'taken': otro proceso de este equipo (GUI/ayudante) ya
+                    // atendió el start. Terminar libera el flag `busy` del device.
+                    Incoming::Error { code } => { warn!("signal error: {code}; fin de sesión"); break; }
                     _ => {}
                 }
             }
@@ -206,7 +212,7 @@ pub async fn run_remote_session(signal_ws_url: &str, name: &str, code: &str) -> 
                 match state {
                     RTCPeerConnectionState::Connected => {
                         if capture_handle.is_none() {
-                            if let Some(t) = track.clone() { capture_handle = Some(capture::start(t, TARGET_FPS, selected.clone())); }
+                            if let Some(t) = track.clone() { capture_handle = Some(capture::start(t, TARGET_FPS, selected.clone(), force_idr.clone())); }
                         }
                     }
                     RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed => break,
@@ -243,6 +249,7 @@ async fn build_peer(
     input_tx: &std::sync::mpsc::Sender<InputEvent>,
     selected: Arc<AtomicUsize>,
     monitor_rect: input::MonitorRect,
+    force_idr: Arc<AtomicBool>,
 ) -> Result<(Arc<RTCPeerConnection>, Arc<TrackLocalStaticSample>, Arc<webrtc::data_channel::RTCDataChannel>)> {
     let mut m = MediaEngine::default();
     m.register_default_codecs()?;
@@ -267,7 +274,25 @@ async fn build_peer(
         },
         "video".to_owned(), "remotix-screen".to_owned(),
     ));
-    pc.add_track(track.clone() as Arc<dyn TrackLocal + Send + Sync>).await?;
+    let sender = pc.add_track(track.clone() as Arc<dyn TrackLocal + Send + Sync>).await?;
+
+    // El visor pide keyframes por RTCP (PLI/FIR) cuando pierde paquetes o se
+    // une a mitad de stream; se lo pasamos al encoder vía el flag `force_idr`.
+    {
+        let force_idr = force_idr.clone();
+        tokio::spawn(async move {
+            while let Ok((pkts, _)) = sender.read_rtcp().await {
+                let wants_idr = pkts.iter().any(|p| {
+                    let any = p.as_any();
+                    any.downcast_ref::<webrtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication>().is_some()
+                        || any.downcast_ref::<webrtc::rtcp::payload_feedbacks::full_intra_request::FullIntraRequest>().is_some()
+                });
+                if wants_idr {
+                    force_idr.store(true, Ordering::SeqCst);
+                }
+            }
+        });
+    }
 
     let dc = pc.create_data_channel("control", None).await?;
     {

@@ -72,7 +72,16 @@ if ($Sign -and (Test-Path $setup)) { & (Join-Path $PSScriptRoot 'sign.ps1') -Fil
 New-Item -ItemType Directory -Force -Path $publicDir | Out-Null
 Copy-Item $setup (Join-Path $publicDir 'RemotixSetup.exe') -Force   # descarga principal
 Copy-Item $exe (Join-Path $publicDir 'remotix.exe') -Force          # portable (soporte ad-hoc)
-Write-Host "Publicado en server\public: RemotixSetup.exe (instalador) + remotix.exe (portable)" -ForegroundColor Green
+
+# Manifiesto de versión (auto-actualización de la APP): /api/update/latest lo lee
+# y la app se actualiza a este RemotixSetup.exe. Sin BOM (Node no lo tolera).
+$manifest = [ordered]@{ version = $Version; url = '/download/RemotixSetup.exe'; notes = ''; mandatory = $false }
+[System.IO.File]::WriteAllText(
+    (Join-Path $publicDir 'remotix-latest.json'),
+    ($manifest | ConvertTo-Json),
+    (New-Object System.Text.UTF8Encoding($false))
+)
+Write-Host "Publicado en server\public: RemotixSetup.exe + remotix.exe + remotix-latest.json (v$Version)" -ForegroundColor Green
 
 Write-Host "`nListo: $setup" -ForegroundColor Green
 if (-not $Sign) {

@@ -89,6 +89,9 @@ fn run_tray(rx: Receiver<LiteEvent>) -> Result<()> {
                         LiteEvent::Status(s) => {
                             let _ = status_item.set_text(s);
                         }
+                        // La actualización del host la aplica el SERVICIO (canal
+                        // host); el ayudante no se auto-actualiza.
+                        LiteEvent::UpdateAvailable => {}
                     }
                 }
             }
