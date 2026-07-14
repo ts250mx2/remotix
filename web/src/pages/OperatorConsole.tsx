@@ -182,6 +182,15 @@ export function OperatorConsole() {
     send({ k: 'wheel', x: p.x, y: p.y, dx: e.deltaX, dy: e.deltaY });
   }
 
+  function sendCtrlAltDel() {
+    send({ k: 'key', down: true, code: 'ControlLeft', key: 'Control' });
+    send({ k: 'key', down: true, code: 'AltLeft', key: 'Alt' });
+    send({ k: 'key', down: true, code: 'Delete', key: 'Delete' });
+    send({ k: 'key', down: false, code: 'Delete', key: 'Delete' });
+    send({ k: 'key', down: false, code: 'AltLeft', key: 'Alt' });
+    send({ k: 'key', down: false, code: 'ControlLeft', key: 'Control' });
+  }
+
   if (phase === 'enter-code') {
     return (
       <main className="centered">
@@ -228,14 +237,25 @@ export function OperatorConsole() {
 
         <div className="hd-toolbar">
           {canControl ? (
-            <button
-              className={controlling ? 'danger' : ''}
-              disabled={!controlReady}
-              onClick={() => setControlling((v) => !v)}
-              title={controlReady ? '' : 'Esperando el canal de control del agente…'}
-            >
-              {controlling ? 'Soltar control' : 'Tomar control'}
-            </button>
+            <>
+              <button
+                className={controlling ? 'danger' : ''}
+                disabled={!controlReady}
+                onClick={() => setControlling((v) => !v)}
+                title={controlReady ? '' : 'Esperando el canal de control del agente…'}
+              >
+                {controlling ? 'Soltar control' : 'Tomar control'}
+              </button>
+              {controlling && (
+                <button
+                  className="ghost"
+                  onClick={sendCtrlAltDel}
+                  title="Envía Ctrl+Alt+Supr al equipo remoto"
+                >
+                  Ctrl+Alt+Supr
+                </button>
+              )}
+            </>
           ) : (
             <span className="muted small">Modo solo lectura (pantalla compartida desde el navegador).</span>
           )}
