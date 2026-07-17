@@ -163,7 +163,12 @@ function handleMessage(ws: WebSocket, msg: Record<string, unknown>): void {
     const wanted = typeof msg.code === 'string' ? msg.code.trim().toUpperCase() : '';
     if (wanted) {
       const reserved = SESSIONS.get(wanted);
-      if (!reserved || reserved.client) return send(ws, { t: 'error', code: 'taken' });
+      if (!reserved) return send(ws, { t: 'error', code: 'taken' });
+      // Solo un cliente VIVO bloquea la sala. Si el socket del intento anterior
+      // quedó muerto (PC suspendida, sesión fallida sin cierre limpio), se permite
+      // re-hospedar en su lugar en vez de responder 'taken' para siempre.
+      const clientAlive = reserved.client && reserved.client.readyState === reserved.client.OPEN;
+      if (clientAlive && reserved.client !== ws) return send(ws, { t: 'error', code: 'taken' });
       reserved.client = ws;
       if (typeof msg.name === 'string') reserved.name = msg.name.slice(0, 120);
       if (typeof msg.issue === 'string') reserved.issue = msg.issue.slice(0, 1000);

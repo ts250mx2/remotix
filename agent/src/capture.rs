@@ -140,10 +140,21 @@ fn capture_loop(
     let mut capturer: Option<Capturer> = None;
     let mut cap_h = 0usize;
     let mut encoder: Option<H264Encoder> = None;
+    // Vincula este hilo al escritorio de entrada activo. En la primera vuelta
+    // enlaza antes de abrir DXGI (clave para capturar la pantalla de login cuando
+    // el ayudante corre como SYSTEM en Winlogon); en las siguientes, detecta el
+    // cambio de escritorio (login↔escritorio, UAC) y fuerza recrear el Capturer,
+    // que de otro modo devuelve negro o pierde acceso al cambiar el escritorio.
+    let mut binder = crate::deskutil::DesktopBinder::new();
 
     loop {
         if stop.load(Ordering::SeqCst) {
             break;
+        }
+        if binder.rebind_if_changed() {
+            info!("escritorio de entrada ahora '{}': recreando captura", binder.name());
+            capturer = None;
+            encoder = None;
         }
         // (Re)abrir captura+encoder si cambió el monitor seleccionado.
         let want = selected.load(Ordering::SeqCst);

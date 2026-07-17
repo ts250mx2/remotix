@@ -40,6 +40,12 @@ pub fn spawn_injector(rect: MonitorRect) -> Sender<InputEvent> {
     std::thread::Builder::new()
         .name("input-injector".into())
         .spawn(move || {
+            // Vincúlate al escritorio de entrada ANTES de crear Enigo. SendInput
+            // llega al escritorio del hilo, así que re-vincular en cada evento hace
+            // que el control siga a la pantalla de login / a un UAC (escritorio
+            // seguro) además del escritorio normal del usuario.
+            let mut binder = crate::deskutil::DesktopBinder::new();
+            binder.rebind_if_changed();
             let mut enigo = match Enigo::new(&Settings::default()) {
                 Ok(e) => e,
                 Err(e) => {
@@ -48,6 +54,7 @@ pub fn spawn_injector(rect: MonitorRect) -> Sender<InputEvent> {
                 }
             };
             while let Ok(evt) = rx.recv() {
+                binder.rebind_if_changed();
                 let (l, t, w, h) = *rect.lock();
                 if let Err(e) = inject(&mut enigo, &evt, l, t, w, h) {
                     warn!("fallo inyectando {evt:?}: {e}");

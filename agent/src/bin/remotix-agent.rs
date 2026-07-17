@@ -10,15 +10,7 @@ use remotix_agent::chat::{self, UiAction, UiEvent};
 use remotix_agent::ui::AgentApp;
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                tracing_subscriber::EnvFilter::new(
-                    "info,webrtc_ice=error,webrtc_mdns=error,webrtc::peer_connection=warn",
-                )
-            }),
-        )
-        .init();
+    remotix_agent::logging::init();
 
     let args: Vec<String> = std::env::args().collect();
 

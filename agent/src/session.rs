@@ -4,6 +4,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
@@ -33,6 +34,32 @@ use crate::input::{self, InputEvent};
 use crate::proto::{IceCandidate, IceServer, Incoming, Outgoing, Sdp, SignalPayload};
 
 const TARGET_FPS: u32 = 20;
+
+/// Tiempo máximo para que la negociación WebRTC llegue a `Connected` desde que el
+/// técnico se une. Si expira, la sesión se aborta (libera el equipo para reintentar)
+/// en vez de quedarse colgada mostrando "conectado" sin vídeo — el síntoma clásico
+/// de un TURN inalcanzable en internet público.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(25);
+
+/// Margen para recuperar una conexión que pasó a `Disconnected` (bache de red)
+/// antes de darla por perdida.
+const RECONNECT_GRACE: Duration = Duration::from_secs(12);
+
+/// Tipo de candidato ICE a partir de su cadena SDP (para diagnosticar por qué no
+/// conecta: sin candidatos `relay` en ambos lados, un NAT restrictivo no cruza).
+fn cand_type(sdp: &str) -> &'static str {
+    if sdp.contains(" typ relay") {
+        "relay"
+    } else if sdp.contains(" typ srflx") {
+        "srflx"
+    } else if sdp.contains(" typ prflx") {
+        "prflx"
+    } else if sdp.contains(" typ host") {
+        "host"
+    } else {
+        "?"
+    }
+}
 
 /// Eventos de la sesión "lite" hacia la GUI.
 pub enum LiteEvent {
@@ -138,7 +165,23 @@ pub async fn run_lite_session(signal_ws_url: &str, name: &str, ui: std::sync::mp
 
 /// Hospeda una sesión de control con `code` y comparte pantalla hasta que el
 /// técnico se desconecta (peer-left) o se cierra la conexión.
-pub async fn run_remote_session(signal_ws_url: &str, name: &str, code: &str) -> Result<()> {
+///
+/// `ui` (opcional) recibe el estado REAL de la conexión: "Estableciendo…" al
+/// negociar y "Conectado" solo cuando WebRTC lo confirma —no antes—. Si la
+/// negociación no llega a `Connected` dentro de `CONNECT_TIMEOUT`, la sesión se
+/// aborta para no dejar el equipo pegado en `busy` (así el técnico puede reintentar).
+pub async fn run_remote_session(
+    signal_ws_url: &str,
+    name: &str,
+    code: &str,
+    ui: Option<std::sync::mpsc::Sender<LiteEvent>>,
+) -> Result<()> {
+    let notify = |s: &str| {
+        if let Some(tx) = &ui {
+            let _ = tx.send(LiteEvent::Status(s.to_string()));
+        }
+    };
+
     let selected = Arc::new(AtomicUsize::new(0));
     let force_idr = Arc::new(AtomicBool::new(false));
     let (iw, ih) = capture::monitor_dims(0).unwrap_or((1920, 1080));
@@ -172,6 +215,11 @@ pub async fn run_remote_session(signal_ws_url: &str, name: &str, code: &str) -> 
     let mut track: Option<Arc<TrackLocalStaticSample>> = None;
     let mut control_dc: Option<Arc<webrtc::data_channel::RTCDataChannel>> = None;
     let mut capture_handle: Option<CaptureHandle> = None;
+    // Fecha límite para llegar a `Connected`. Se arma desde el arranque (cubre el
+    // caso "el técnico nunca llega a unirse"), se re-arma al unirse el técnico y
+    // tras un `Disconnected`, y se limpia (`None`) una vez conectados.
+    let mut connect_deadline: Option<tokio::time::Instant> =
+        Some(tokio::time::Instant::now() + CONNECT_TIMEOUT);
 
     loop {
         tokio::select! {
@@ -185,8 +233,17 @@ pub async fn run_remote_session(signal_ws_url: &str, name: &str, code: &str) -> 
                 };
                 let incoming: Incoming = match serde_json::from_str(&text) { Ok(v) => v, Err(_) => continue };
                 match incoming {
-                    Incoming::Hosted { ice_servers: ice, .. } => { ice_servers = ice; }
+                    Incoming::Hosted { ice_servers: ice, .. } => {
+                        let relay = ice.iter().filter(|s| s.urls.clone().into_vec().iter().any(|u| u.starts_with("turn"))).count();
+                        info!("señalización lista: {} ICE server(s), {} con TURN", ice.len(), relay);
+                        if relay == 0 {
+                            warn!("el servidor no entregó TURN: en internet público con NAT restrictivo la conexión puede no establecerse");
+                        }
+                        ice_servers = ice;
+                    }
                     Incoming::PeerJoined => {
+                        info!("técnico se unió; negociando WebRTC");
+                        notify("Estableciendo conexión con el técnico…");
                         match build_peer(&ice_servers, &out_tx, &state_tx, &input_tx, selected.clone(), monitor_rect.clone(), force_idr.clone()).await {
                             Ok((new_pc, new_track, dc)) => {
                                 if let Ok(offer) = new_pc.create_offer(None).await {
@@ -196,8 +253,13 @@ pub async fn run_remote_session(signal_ws_url: &str, name: &str, code: &str) -> 
                                     }
                                 }
                                 pc = Some(new_pc); track = Some(new_track); control_dc = Some(dc);
+                                connect_deadline = Some(tokio::time::Instant::now() + CONNECT_TIMEOUT);
                             }
-                            Err(e) => error!("peer: {e:#}"),
+                            Err(e) => {
+                                error!("no se pudo crear el peer: {e:#}");
+                                notify("Error preparando la conexión.");
+                                break;
+                            }
                         }
                     }
                     Incoming::Signal { payload } => { if let Some(p) = pc.as_ref() { handle_signal(p, payload).await; } }
@@ -209,16 +271,40 @@ pub async fn run_remote_session(signal_ws_url: &str, name: &str, code: &str) -> 
                 }
             }
             Some(state) = state_rx.recv() => {
+                info!("estado WebRTC: {state:?}");
                 match state {
                     RTCPeerConnectionState::Connected => {
+                        connect_deadline = None;
                         if capture_handle.is_none() {
                             if let Some(t) = track.clone() { capture_handle = Some(capture::start(t, TARGET_FPS, selected.clone(), force_idr.clone())); }
                         }
+                        notify("Conectado · compartiendo tu pantalla");
                     }
-                    RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed => break,
-                    RTCPeerConnectionState::Disconnected => { capture_handle = None; }
+                    RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed => {
+                        warn!("conexión WebRTC {state:?}; fin de sesión");
+                        break;
+                    }
+                    RTCPeerConnectionState::Disconnected => {
+                        // Bache de red: paramos captura y damos un margen para recuperar.
+                        capture_handle = None;
+                        connect_deadline = Some(tokio::time::Instant::now() + RECONNECT_GRACE);
+                        notify("Reconectando…");
+                    }
                     _ => {}
                 }
+            }
+            // Guardia de tiempo: si `connect_deadline` está activo y expira sin
+            // llegar a `Connected`, abortamos (evita el cuelgue "conectado sin vídeo"
+            // y libera el equipo). Con `None`, este futuro nunca resuelve.
+            () = async {
+                match connect_deadline {
+                    Some(d) => tokio::time::sleep_until(d).await,
+                    None => std::future::pending::<()>().await,
+                }
+            } => {
+                warn!("timeout de conexión WebRTC ({}s) sin llegar a Connected; abortando para liberar el equipo", CONNECT_TIMEOUT.as_secs());
+                notify("No se pudo establecer la conexión (revisa red/TURN).");
+                break;
             }
         }
     }
@@ -237,6 +323,7 @@ async fn handle_signal(pc: &Arc<RTCPeerConnection>, payload: SignalPayload) {
             }
         }
     } else if let Some(c) = payload.candidate {
+        info!("candidato remoto ICE: {}", cand_type(&c.candidate));
         let init = RTCIceCandidateInit { candidate: c.candidate, sdp_mid: c.sdp_mid, sdp_mline_index: c.sdp_mline_index, username_fragment: c.username_fragment };
         let _ = pc.add_ice_candidate(init).await;
     }
@@ -347,6 +434,7 @@ async fn build_peer(
             Box::pin(async move {
                 if let Some(c) = cand {
                     if let Ok(init) = c.to_json() {
+                        info!("candidato local ICE: {}", cand_type(&init.candidate));
                         let payload = SignalPayload { sdp: None, candidate: Some(IceCandidate {
                             candidate: init.candidate, sdp_mid: init.sdp_mid, sdp_mline_index: init.sdp_mline_index, username_fragment: init.username_fragment }) };
                         if let Ok(text) = serde_json::to_string(&Outgoing::Signal { payload }) { let _ = out.send(text); }

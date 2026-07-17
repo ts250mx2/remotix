@@ -249,7 +249,7 @@ async fn connect_once(
                         let tx = ui_tx.clone();
                         tokio::spawn(async move {
                             let _ = tx.send(UiEvent::RemoteStatus("Compartiendo pantalla con el técnico…".into()));
-                            if let Err(e) = run_remote_session(&signal_url, &name, &code).await {
+                            if let Err(e) = run_remote_session(&signal_url, &name, &code, None).await {
                                 let _ = tx.send(UiEvent::RemoteStatus(format!("Sesión terminada: {e}")));
                             } else {
                                 let _ = tx.send(UiEvent::RemoteStatus("Sesión de control finalizada.".into()));

@@ -556,12 +556,7 @@ fn run_viewer_console(server: &str, code: &str) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,remotix_agent=info")),
-        )
-        .init();
+    remotix_agent::logging::init();
 
     let server = resolve_server();
     let name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Equipo".into());
@@ -632,6 +627,10 @@ fn main() -> Result<()> {
                     drop(acc);
                     *ui.user.lock() = Some(user);
                     *ui.devices.lock() = devs;
+                    // Asegura que este equipo siga vinculado a la cuenta (p. ej. si
+                    // se re-registró con otra clave, o si el login previo no alcanzó
+                    // a reclamarlo). Idempotente.
+                    claim_this_device(&account, &ui).await;
                 }
                 // Solo el rechazo EXPLÍCITO del servidor borra el token; un fallo
                 // de red al arrancar no debe desloguear al usuario.
@@ -779,7 +778,6 @@ impl RemotixApp {
     fn do_login(&self) {
         let email = self.email.trim().to_string();
         let password = self.password.clone();
-        let access_key = self.host_code.clone();
         let account = self.account.clone();
         let ui = self.ui.clone();
         self.rt.spawn(async move {
@@ -789,13 +787,17 @@ impl RemotixApp {
             match acc.login(&email, &password).await {
                 Ok(user) => {
                     LiteConfig::set_session(acc.token(), Some(user.email.clone()));
-                    if let Some(k) = &access_key {
-                        let _ = acc.claim(k).await; // reclama este equipo si está libre
-                    }
                     let devs = acc.devices().await.unwrap_or_default();
                     drop(acc);
                     *ui.user.lock() = Some(user);
                     *ui.devices.lock() = devs;
+                    ui.busy.store(false, Ordering::SeqCst);
+                    // Vincula ESTE equipo a la cuenta en segundo plano (su clave
+                    // puede tardar en registrarse la primera vez) y refresca la lista.
+                    let account = account.clone();
+                    let ui = ui.clone();
+                    tokio::spawn(async move { claim_this_device(&account, &ui).await; });
+                    return;
                 }
                 Err(e) => { *ui.error.lock() = Some(e.to_string()); }
             }
@@ -1101,6 +1103,37 @@ impl RemotixApp {
             }
         });
         action
+    }
+}
+
+/// Vincula ESTE equipo a la cuenta logueada por su clave fija. El registro del
+/// equipo es asíncrono y su clave puede tardar unos segundos en persistirse, así
+/// que espera a que esté disponible (reintenta ~20 s) antes de reclamarla. El
+/// claim del servidor es idempotente: si el equipo no tiene dueño queda como
+/// dueño; si ya lo tiene, se añade como compartido. Luego refresca la libreta
+/// para que el equipo recién vinculado aparezca sin esperar al refresco periódico.
+async fn claim_this_device(account: &Arc<tokio::sync::Mutex<Account>>, ui: &Arc<UiShared>) {
+    let mut key: Option<String> = None;
+    for _ in 0..20 {
+        if let Some(c) = LiteConfig::load() {
+            if !c.access_key.is_empty() {
+                key = Some(c.access_key);
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    let Some(key) = key else {
+        warn!("no se pudo vincular el equipo: su clave aún no está disponible");
+        return;
+    };
+    let acc = account.lock().await;
+    if let Err(e) = acc.claim(&key).await {
+        warn!("no se pudo vincular este equipo a la cuenta: {e}");
+    }
+    if let Ok(devs) = acc.devices().await {
+        drop(acc);
+        *ui.devices.lock() = devs;
     }
 }
 

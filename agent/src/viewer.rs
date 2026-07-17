@@ -46,6 +46,11 @@ use crate::decode::H264Decoder;
 use crate::input::InputEvent;
 use crate::proto::{IceCandidate, IceServer, Incoming, Outgoing, Sdp, SignalPayload};
 
+/// Tiempo máximo, desde que el operador se une, para que la conexión llegue a
+/// `Connected`. Si expira (el equipo no hospedó o el ICE no cruzó), el visor se
+/// cierra con un mensaje claro en vez de quedarse en "Conectando…" para siempre.
+const VIEWER_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Frame decodificado listo para subir a una textura (RGBA8, sin premultiplicar).
 pub struct DecodedFrame {
     pub w: usize,
@@ -389,6 +394,9 @@ pub async fn run_viewer_session(
     let pc = build_viewer_peer(&ice_servers, &out_tx, &state_tx, au_tx, control_slot.clone(), shared.clone()).await?;
     let mut remote_set = false;
     let mut pending: Vec<RTCIceCandidateInit> = Vec::new();
+    // Fecha límite de conexión: activa hasta llegar a `Connected`.
+    let mut connect_deadline: Option<tokio::time::Instant> =
+        Some(tokio::time::Instant::now() + VIEWER_CONNECT_TIMEOUT);
 
     loop {
         tokio::select! {
@@ -410,11 +418,26 @@ pub async fn run_viewer_session(
             }
             Some(state) = state_rx.recv() => {
                 match state {
-                    RTCPeerConnectionState::Connected => shared.set_status("Conectado"),
+                    RTCPeerConnectionState::Connected => { connect_deadline = None; shared.set_status("Conectado"); }
                     RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed => { shared.set_status("Conexión cerrada."); break; }
-                    RTCPeerConnectionState::Disconnected => shared.set_status("Reconectando…"),
+                    RTCPeerConnectionState::Disconnected => {
+                        // Da un margen para recuperar antes de rendirse.
+                        connect_deadline = Some(tokio::time::Instant::now() + VIEWER_CONNECT_TIMEOUT);
+                        shared.set_status("Reconectando…");
+                    }
                     _ => {}
                 }
+            }
+            // Guardia de tiempo: si no se llega a `Connected`, cerrar con mensaje.
+            () = async {
+                match connect_deadline {
+                    Some(d) => tokio::time::sleep_until(d).await,
+                    None => std::future::pending::<()>().await,
+                }
+            } => {
+                warn!("visor: timeout de conexión ({}s) sin vídeo; cerrando", VIEWER_CONNECT_TIMEOUT.as_secs());
+                shared.set_status("No se pudo conectar con el equipo (revisa la red o intenta de nuevo).");
+                break;
             }
         }
     }

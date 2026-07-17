@@ -172,8 +172,10 @@ async fn connect_once(
                         let ui2 = ui.clone();
                         let busy2 = busy.clone();
                         tokio::spawn(async move {
-                            let _ = ui2.send(LiteEvent::Status("Conectado · compartiendo tu pantalla".into()));
-                            if let Err(e) = run_remote_session(&signal, &name, &code).await {
+                            // Estado honesto: el visor lo actualizará a "Conectado"
+                            // solo cuando WebRTC lo confirme (dentro de run_remote_session).
+                            let _ = ui2.send(LiteEvent::Status("El técnico se está conectando…".into()));
+                            if let Err(e) = run_remote_session(&signal, &name, &code, Some(ui2.clone())).await {
                                 warn!("sesión: {e:#}");
                             }
                             busy2.store(false, Ordering::SeqCst);
