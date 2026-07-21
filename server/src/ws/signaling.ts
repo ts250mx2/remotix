@@ -262,6 +262,11 @@ function handleMessage(ws: WebSocket, msg: Record<string, unknown>): void {
   send(ws, { t: 'error', code: 'unknown_type' });
 }
 
+/// Gracia para que un host que murió a MITAD de sesión (actualización en
+/// caliente, crash breve) vuelva a hospedar la misma sala antes de darla por
+/// terminada. Cubre descarga + instalador + relanzamiento + re-registro.
+const HOST_RECONNECT_GRACE_MS = 90_000;
+
 function handleClose(ws: WebSocket): void {
   const meta = CONNS.get(ws);
   if (!meta) return;
@@ -270,6 +275,27 @@ function handleClose(ws: WebSocket): void {
   if (!session) return;
 
   if (meta.role === 'client') {
+    const operatorAlive = session.operator && session.operator.readyState === session.operator.OPEN;
+    // Sesión de equipo (deviceId) con el técnico aún mirando: NO se tira la
+    // sala. El host puede estar actualizándose en caliente y volverá a
+    // hospedarla (el `host` con código ya permite re-hospedar sobre un socket
+    // muerto). El operador espera con `host-reconnecting`; si en la gracia no
+    // vuelve nadie, entonces sí: peer-left y sala fuera.
+    if (session.deviceId && operatorAlive) {
+      session.client = null;
+      send(session.operator, { t: 'host-reconnecting' });
+      const code = session.code;
+      setTimeout(() => {
+        const s = SESSIONS.get(code);
+        if (!s) return;
+        const clientAlive = s.client && s.client.readyState === s.client.OPEN;
+        if (!clientAlive) {
+          send(s.operator, { t: 'peer-left' });
+          dropSession(s);
+        }
+      }, HOST_RECONNECT_GRACE_MS).unref();
+      return;
+    }
     // El host se fue: la sala termina.
     send(session.operator, { t: 'peer-left' });
     dropSession(session);

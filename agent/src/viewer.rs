@@ -51,6 +51,11 @@ use crate::proto::{IceCandidate, IceServer, Incoming, Outgoing, Sdp, SignalPaylo
 /// cierra con un mensaje claro en vez de quedarse en "Conectando…" para siempre.
 const VIEWER_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Espera máxima a que el host vuelva tras `host-reconnecting` (actualización en
+/// caliente). Un poco mayor que la gracia del servidor (90 s), que es quien
+/// normalmente corta antes con `peer-left` si el equipo no regresó.
+const HOST_RESUME_TIMEOUT: Duration = Duration::from_secs(100);
+
 /// Frame decodificado listo para subir a una textura (RGBA8, sin premultiplicar).
 pub struct DecodedFrame {
     pub w: usize,
@@ -393,7 +398,7 @@ pub async fn run_viewer_session(
     send(&out_tx, &Outgoing::Join { code: code.to_string() });
     shared.set_status("Conectando…");
 
-    let pc = build_viewer_peer(&ice_servers, &out_tx, &state_tx, au_tx, control_slot.clone(), shared.clone()).await?;
+    let mut pc = build_viewer_peer(&ice_servers, &out_tx, &state_tx, au_tx.clone(), control_slot.clone(), shared.clone()).await?;
     let mut remote_set = false;
     let mut pending: Vec<RTCIceCandidateInit> = Vec::new();
     // Fecha límite de conexión: activa hasta llegar a `Connected`.
@@ -413,6 +418,26 @@ pub async fn run_viewer_session(
                     // de nadie); esto solo es el instante entre reservar y unirse.
                     Incoming::Waiting => shared.set_status("Conectando con el equipo…"),
                     Incoming::Signal { payload } => handle_signal(&pc, payload, &out_tx, &mut remote_set, &mut pending).await,
+                    // El host murió a mitad de sesión (actualización en caliente):
+                    // el servidor mantiene la sala. Se descarta el peer viejo (su
+                    // DTLS murió con aquel proceso) y se espera al nuevo con un
+                    // peer LIMPIO; al volver, el host manda una oferta nueva y la
+                    // sesión renegocia sola. El último frame queda congelado en
+                    // pantalla mientras tanto.
+                    Incoming::HostReconnecting => {
+                        shared.set_status("El equipo remoto se está actualizando… esperando a que vuelva");
+                        let _ = pc.close().await;
+                        // Canal de estado NUEVO: los Closed/Failed del peer viejo
+                        // no deben matar la espera.
+                        let (ntx, nrx) = mpsc::unbounded_channel::<RTCPeerConnectionState>();
+                        state_rx = nrx;
+                        pc = build_viewer_peer(&ice_servers, &out_tx, &ntx, au_tx.clone(), control_slot.clone(), shared.clone()).await?;
+                        remote_set = false;
+                        pending.clear();
+                        // Una transferencia de archivos a medias no sobrevive.
+                        *shared.files_ui.progress.lock() = None;
+                        connect_deadline = Some(tokio::time::Instant::now() + HOST_RESUME_TIMEOUT);
+                    }
                     Incoming::PeerLeft => { shared.set_status("El equipo cerró la sesión."); break; }
                     Incoming::Error { code } => {
                         let msg = match code.as_str() {

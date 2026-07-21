@@ -104,6 +104,68 @@ pub fn session_active() -> bool {
     lock_path().exists()
 }
 
+// ---------------------------------------------------------------------------
+// Reanudación de sesión tras actualización en caliente
+// ---------------------------------------------------------------------------
+//
+// Mientras hay una sesión activa, el host escribe (y refresca cada ~30 s) un
+// archivo con el código de la sala. Si el proceso muere a mitad (el instalador
+// lo reemplaza), el proceso NUEVO encuentra el archivo fresco al arrancar y
+// vuelve a hospedar LA MISMA sala — el visor del técnico, que quedó esperando
+// (`host-reconnecting`), renegocia y la sesión continúa sola.
+
+#[cfg(windows)]
+fn resume_path() -> std::path::PathBuf {
+    state_dir().join("resume-session.json")
+}
+
+/// Frescura máxima del archivo de reanudación: cubre descarga + instalador +
+/// relanzamiento, pero descarta sesiones de un apagado/crash de hace horas.
+const RESUME_MAX_AGE_SECS: u64 = 120;
+
+fn now_epoch() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Escribe (o refresca) el código de la sesión activa. Lo llama el host al
+/// empezar a hospedar y cada ~30 s mientras dure.
+#[cfg(windows)]
+pub fn write_resume(code: &str) {
+    let body = serde_json::json!({ "code": code, "ts": now_epoch() });
+    let _ = std::fs::write(resume_path(), body.to_string());
+}
+
+/// Borra el marcador (la sesión terminó de forma normal).
+#[cfg(windows)]
+pub fn clear_resume() {
+    let _ = std::fs::remove_file(resume_path());
+}
+
+/// Si el proceso anterior murió con una sesión activa (marcador fresco),
+/// devuelve el código para re-hospedarla. Consume el archivo.
+#[cfg(windows)]
+pub fn take_resume() -> Option<String> {
+    let raw = std::fs::read_to_string(resume_path()).ok()?;
+    let _ = std::fs::remove_file(resume_path());
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let ts = v.get("ts").and_then(|x| x.as_u64())?;
+    let code = v.get("code").and_then(|x| x.as_str())?.to_string();
+    let age = now_epoch().saturating_sub(ts);
+    (!code.is_empty() && age <= RESUME_MAX_AGE_SECS).then_some(code)
+}
+
+#[cfg(not(windows))]
+pub fn write_resume(_code: &str) {}
+#[cfg(not(windows))]
+pub fn clear_resume() {}
+#[cfg(not(windows))]
+pub fn take_resume() -> Option<String> {
+    None
+}
+
 /// Descarga el instalador y lo ejecuta en silencio. El instalador detiene el
 /// servicio, reemplaza los archivos y lo vuelve a arrancar. Sin UAC (lo lanza el
 /// servicio como SYSTEM).

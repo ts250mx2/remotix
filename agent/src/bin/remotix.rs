@@ -805,10 +805,14 @@ struct UiShared {
 async fn check_update_and_maybe_apply(server: &str, ui: &Arc<UiShared>) {
     let Some(info) = update::check_latest(server).await else { return };
     *ui.update.lock() = Some(info.clone());
-    let idle = !update::session_active()
-        && !ui.viewer_active.load(Ordering::SeqCst)
+    // Actualización EN CALIENTE: una sesión hospedada YA NO bloquea (el marcador
+    // de reanudación hace que el proceso nuevo re-hospede la misma sala y el
+    // visor del técnico reconecte solo). Sí se respeta:
+    //  - visor abierto (ESTE usuario está viendo otra PC: no cortarle su ventana);
+    //  - ventana visible sin mandatory (no reiniciar la app en la cara del usuario).
+    let ok_to_apply = !ui.viewer_active.load(Ordering::SeqCst)
         && (!own_window_visible() || info.mandatory);
-    if idle && update::download_and_apply(server, &info.url).await.is_ok() {
+    if ok_to_apply && update::download_and_apply(server, &info.url).await.is_ok() {
         // El instalador cierra este proceso, reemplaza el exe y relanza con --tray.
         std::process::exit(0);
     }

@@ -110,6 +110,29 @@ pub async fn ensure_registered(server: &str, name: &str) {
 pub async fn run_device(mut cfg: LiteConfig, name: String, ui: std::sync::mpsc::Sender<LiteEvent>) {
     let _ = ui.send(LiteEvent::Code(cfg.access_key.clone()));
     let busy = Arc::new(AtomicBool::new(false));
+
+    // Reanudación en caliente: el proceso anterior murió con una sesión activa
+    // (p. ej. lo reemplazó el instalador de una actualización). Re-hospeda la
+    // MISMA sala de inmediato: el visor del técnico sigue esperando en ella.
+    if let Some(code) = crate::update::take_resume() {
+        if !busy.swap(true, Ordering::SeqCst) {
+            info!("reanudando sesión tras actualización: sala {code}");
+            crate::update::set_session_active(true);
+            let signal = cfg.ws_signal_url();
+            let name2 = name.clone();
+            let ui2 = ui.clone();
+            let busy2 = busy.clone();
+            tokio::spawn(async move {
+                let _ = ui2.send(LiteEvent::Status("Reanudando la sesión tras actualizar…".into()));
+                if let Err(e) = run_remote_session(&signal, &name2, &code, Some(ui2.clone())).await {
+                    warn!("reanudación de sesión: {e:#}");
+                }
+                busy2.store(false, Ordering::SeqCst);
+                crate::update::set_session_active(false);
+                let _ = ui2.send(LiteEvent::Status("En línea · listo para recibir conexiones".into()));
+            });
+        }
+    }
     loop {
         let _ = ui.send(LiteEvent::Status("Conectando al servidor…".into()));
         match connect_once(&cfg, &name, &ui, &busy).await {

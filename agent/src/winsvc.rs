@@ -328,9 +328,15 @@ fn maybe_auto_update() {
         Some(i) => i,
         None => return, // ya estamos al día (o no hay manifiesto del canal host)
     };
-    if !info.mandatory && crate::update::session_active() {
-        log_line(&format!("actualización {} disponible; pospuesta (sesión activa)", info.version));
-        return;
+    // Actualización EN CALIENTE: ya no se pospone por sesión activa. El ayudante
+    // mantiene un marcador de reanudación (resume-session.json) que el proceso
+    // nuevo usa para re-hospedar la MISMA sala; el visor del técnico espera con
+    // `host-reconnecting` y la sesión continúa sola tras unos segundos.
+    if crate::update::session_active() {
+        log_line(&format!(
+            "actualización {} con sesión activa: se aplicará y la sesión se reanudará en caliente",
+            info.version
+        ));
     }
     log_line(&format!(
         "aplicando actualización {} → {}",

@@ -329,6 +329,15 @@ export class SupportConnection {
         else this.handlers.onStatus?.('Conectando con el equipo…');
         break;
 
+      case 'host-reconnecting':
+        // El host murió a MITAD de sesión (p. ej. actualización en caliente):
+        // el servidor mantiene la sala viva. Se descarta el peer muerto y se
+        // espera la oferta nueva del host reanudado (ensureOperatorPc crea el
+        // peer limpio al llegar); mientras tanto la consola muestra este estado.
+        this.teardownPc();
+        this.handlers.onStatus?.('El equipo remoto se está actualizando… reconectando');
+        break;
+
       case 'peer-left':
         this.peerPresent = false;
         this.teardownPc();

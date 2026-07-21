@@ -48,6 +48,10 @@ pub enum Incoming {
     },
     #[serde(rename = "waiting")]
     Waiting,
+    // El host se cayó a mitad de sesión (p. ej. actualización en caliente): el
+    // servidor mantiene la sala viva y avisa; el visor espera a que vuelva.
+    #[serde(rename = "host-reconnecting")]
+    HostReconnecting,
     #[serde(rename = "signal")]
     Signal { payload: SignalPayload },
     #[serde(rename = "chat")]

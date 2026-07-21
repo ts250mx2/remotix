@@ -179,6 +179,36 @@ pub async fn run_remote_session(
     code: &str,
     ui: Option<std::sync::mpsc::Sender<LiteEvent>>,
 ) -> Result<()> {
+    // Marcador de reanudación en caliente: mientras la sesión viva, un archivo
+    // fresco con su código. Si el instalador mata este proceso, el proceso
+    // nuevo lo encuentra al arrancar y re-hospeda la MISMA sala (el visor del
+    // técnico queda esperando con `host-reconnecting`).
+    crate::update::write_resume(code);
+    let heartbeat_alive = Arc::new(AtomicBool::new(true));
+    {
+        let alive = heartbeat_alive.clone();
+        let code = code.to_string();
+        tokio::spawn(async move {
+            while alive.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                if alive.load(Ordering::SeqCst) {
+                    crate::update::write_resume(&code);
+                }
+            }
+        });
+    }
+    let result = run_remote_session_inner(signal_ws_url, name, code, ui).await;
+    heartbeat_alive.store(false, Ordering::SeqCst);
+    crate::update::clear_resume();
+    result
+}
+
+async fn run_remote_session_inner(
+    signal_ws_url: &str,
+    name: &str,
+    code: &str,
+    ui: Option<std::sync::mpsc::Sender<LiteEvent>>,
+) -> Result<()> {
     let notify = |s: &str| {
         if let Some(tx) = &ui {
             let _ = tx.send(LiteEvent::Status(s.to_string()));
