@@ -29,6 +29,7 @@ use remotix_agent::input::InputEvent;
 use remotix_agent::session::LiteEvent;
 use remotix_agent::update::{self, UpdateInfo};
 use remotix_agent::viewer::{self, ViewerShared};
+use webrtc::data_channel::RTCDataChannel;
 
 fn resolve_server() -> String {
     let baked = option_env!("REMOTIX_DEFAULT_SERVER").unwrap_or("ws://localhost:8080");
@@ -822,6 +823,92 @@ struct ActiveViewer {
     size: [usize; 2],
     prev_mods: egui::Modifiers,
     fullscreen: bool,
+    fmgr: FileMgr,
+}
+
+/// Explorador de archivos estilo TeamViewer: dos paneles (este equipo ⟷ equipo
+/// remoto) con navegación de carpetas y transferencia en ambas direcciones.
+struct FileMgr {
+    open: bool,
+    /// Carpeta del panel local ("" = unidades).
+    local_dir: String,
+    local_entries: Vec<files::DirEntry>,
+    local_err: Option<String>,
+    local_sel: Option<String>,
+    /// Carpeta del panel remoto ("" = unidades del host).
+    remote_dir: String,
+    remote_entries: Vec<files::DirEntry>,
+    remote_err: Option<String>,
+    remote_sel: Option<String>,
+    remote_loading: bool,
+    /// Cuándo se pidió el listado remoto (timeout → versión vieja sin explorador).
+    loading_since: Option<Instant>,
+    /// Último aviso de transferencia visto (para refrescar el panel receptor).
+    last_msg_seen: Option<String>,
+}
+
+impl Default for FileMgr {
+    fn default() -> Self {
+        FileMgr {
+            open: false,
+            local_dir: std::env::var("USERPROFILE").unwrap_or_default(),
+            local_entries: Vec::new(),
+            local_err: None,
+            local_sel: None,
+            remote_dir: String::new(),
+            remote_entries: Vec::new(),
+            remote_err: None,
+            remote_sel: None,
+            remote_loading: false,
+            loading_since: None,
+            last_msg_seen: None,
+        }
+    }
+}
+
+impl FileMgr {
+    fn refresh_local(&mut self) {
+        match files::list_local(&self.local_dir) {
+            Ok(e) => {
+                self.local_entries = e;
+                self.local_err = None;
+            }
+            Err(e) => {
+                self.local_entries.clear();
+                self.local_err = Some(e);
+            }
+        }
+        self.local_sel = None;
+    }
+
+    fn nav_local(&mut self, dir: String) {
+        self.local_dir = dir;
+        self.refresh_local();
+    }
+
+    fn nav_remote(&mut self, dc: Arc<RTCDataChannel>, dir: String) {
+        self.remote_dir = dir;
+        self.remote_sel = None;
+        self.remote_err = None;
+        self.remote_loading = true;
+        self.loading_since = Some(Instant::now());
+        files::browse_remote(dc, self.remote_dir.clone());
+    }
+}
+
+fn human_size(b: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if b >= GB {
+        format!("{:.2} GB", b as f64 / GB as f64)
+    } else if b >= MB {
+        format!("{:.1} MB", b as f64 / MB as f64)
+    } else if b >= KB {
+        format!("{:.0} KB", b as f64 / KB as f64)
+    } else {
+        format!("{b} B")
+    }
 }
 
 enum Action {
@@ -1187,20 +1274,41 @@ impl RemotixApp {
                                                 ui.label(egui::RichText::new(role).monospace().size(9.5).color(role_c));
                                             });
                                     });
-                                    // Meta bicolor: la clave en ámbar (es una clave), el SO apagado.
-                                    if !d.access_key.is_empty() || d.os.is_some() {
-                                        ui.horizontal(|ui| {
-                                            ui.spacing_mut().item_spacing.x = 0.0;
-                                            if !d.access_key.is_empty() {
-                                                let key_c = if d.online { AMBER } else { meta_c };
-                                                ui.label(egui::RichText::new(format_key(&d.access_key)).monospace().size(10.5).color(key_c));
-                                            }
-                                            if let Some(os) = &d.os {
-                                                let sep = if d.access_key.is_empty() { "" } else { " · " };
-                                                ui.label(egui::RichText::new(format!("{sep}{os}")).monospace().size(10.5).color(meta_c));
-                                            }
-                                        });
-                                    }
+                                    // Meta multicolor: clave en ámbar, SO apagado y VERSIÓN del
+                                    // agente (magenta = igual que este Remotix; ámbar = distinta,
+                                    // probablemente pendiente de actualizar; v? = nunca reportó).
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 0.0;
+                                        if !d.access_key.is_empty() {
+                                            let key_c = if d.online { AMBER } else { meta_c };
+                                            ui.label(egui::RichText::new(format_key(&d.access_key)).monospace().size(10.5).color(key_c));
+                                        }
+                                        if let Some(os) = &d.os {
+                                            let sep = if d.access_key.is_empty() { "" } else { " · " };
+                                            ui.label(egui::RichText::new(format!("{sep}{os}")).monospace().size(10.5).color(meta_c));
+                                        }
+                                        let vtxt = d.agent_version.clone().map(|v| format!("v{v}")).unwrap_or_else(|| "v?".into());
+                                        let same = d.agent_version.as_deref() == Some(update::CURRENT_VERSION);
+                                        let vc = if !d.online {
+                                            meta_c
+                                        } else if same {
+                                            MAGENTA
+                                        } else if d.agent_version.is_some() {
+                                            AMBER
+                                        } else {
+                                            meta_c
+                                        };
+                                        let sep = if d.access_key.is_empty() && d.os.is_none() { "" } else { " · " };
+                                        let hover = if same {
+                                            "Versión al día (igual que este Remotix)".to_string()
+                                        } else if d.agent_version.is_some() {
+                                            format!("Distinta a la de este Remotix (v{}): pendiente de actualizar", update::CURRENT_VERSION)
+                                        } else {
+                                            "Esa PC aún no reporta su versión (agente muy antiguo)".to_string()
+                                        };
+                                        ui.label(egui::RichText::new(format!("{sep}{vtxt}")).monospace().size(10.5).color(vc))
+                                            .on_hover_text(hover);
+                                    });
                                 });
                             });
                         });
@@ -1269,24 +1377,208 @@ fn spawn_viewer(ui: &Arc<UiShared>, server: &str, code: String, name: String) {
     });
     *ui.pending_viewer.lock() = Some(ActiveViewer {
         shared, input_tx, name, tex: None, size: [0, 0], prev_mods: egui::Modifiers::default(),
-        fullscreen: false,
+        fullscreen: false, fmgr: FileMgr::default(),
     });
 }
 
-/// Botones de transferencia de archivos (reutilizados en ventana y pantalla completa).
-fn file_buttons(ui: &mut egui::Ui, av: &ActiveViewer, rt: &tokio::runtime::Handle) {
+/// Botón del explorador de archivos (reutilizado en ventana y pantalla completa):
+/// abre/cierra la ventana de transferencia estilo TeamViewer.
+fn file_buttons(ui: &mut egui::Ui, av: &mut ActiveViewer, _rt: &tokio::runtime::Handle) {
     let files_dc = av.shared.files_dc.lock().clone();
     let on = files_dc.is_some();
-    if ui.add_enabled(on, egui::Button::new("📥 Pedir archivo")).clicked() {
-        if let Some(dc) = files_dc.clone() {
-            rt.spawn(async move { files::request_file(dc).await; });
+    let label = if av.fmgr.open { "📁 Archivos ▾" } else { "📁 Archivos" };
+    if ui.add_enabled(on, egui::Button::new(label)).clicked() {
+        av.fmgr.open = !av.fmgr.open;
+        if av.fmgr.open {
+            av.fmgr.refresh_local();
+            if let Some(dc) = files_dc {
+                let dir = av.fmgr.remote_dir.clone();
+                av.fmgr.nav_remote(dc, dir);
+            }
         }
     }
-    if ui.add_enabled(on, egui::Button::new("📤 Enviar archivo")).clicked() {
-        if let Some(dc) = files_dc {
-            rt.spawn(async move { files::pick_and_send(dc); });
+}
+
+/// Acción emitida por un panel del explorador.
+enum PanelAction {
+    /// Navegar a esta carpeta (ruta completa).
+    Nav(String),
+    /// Seleccionar esta entrada (nombre).
+    Select(String),
+}
+
+/// Pinta un panel del explorador (local o remoto). Devuelve la acción del
+/// usuario, que el llamador aplica sobre su lado.
+#[allow(clippy::too_many_arguments)]
+fn draw_panel(
+    ui: &mut egui::Ui,
+    title: &str,
+    accent: Color32,
+    cur_dir: &str,
+    entries: &[files::DirEntry],
+    err: &Option<String>,
+    sel: &Option<String>,
+    loading: bool,
+) -> Option<PanelAction> {
+    let mut action = None;
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(format!("[ {title} ]")).monospace().size(12.0).strong().color(accent));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.small_button("⟳").on_hover_text("Actualizar").clicked() {
+                action = Some(PanelAction::Nav(cur_dir.to_string()));
+            }
+            if ui.small_button("⬆").on_hover_text("Carpeta superior").clicked() {
+                action = Some(PanelAction::Nav(files::parent_dir(cur_dir)));
+            }
+        });
+    });
+    let shown_dir = if cur_dir.is_empty() { "(unidades)" } else { cur_dir };
+    ui.label(egui::RichText::new(shown_dir).monospace().size(10.5).color(MUTED));
+    ui.add_space(4.0);
+
+    egui::Frame::none()
+        .fill(Color32::BLACK)
+        .stroke(egui::Stroke::new(1.0, accent.gamma_multiply(0.3)))
+        .rounding(egui::Rounding::same(4.0))
+        .inner_margin(egui::Margin::same(6.0))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            egui::ScrollArea::vertical()
+                .id_salt(title.to_string())
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if let Some(e) = err {
+                        ui.label(egui::RichText::new(format!("✗ {e}")).monospace().size(11.0).color(REDC));
+                        return;
+                    }
+                    if loading {
+                        ui.label(egui::RichText::new("cargando…").monospace().size(11.0).color(AMBER));
+                        return;
+                    }
+                    if entries.is_empty() {
+                        ui.label(egui::RichText::new("// vacío").monospace().size(11.0).color(MUTED));
+                        return;
+                    }
+                    for e in entries {
+                        let selected = sel.as_deref() == Some(e.n.as_str());
+                        let icon = if e.d { "📁" } else { "📄" };
+                        let size = if e.d { String::new() } else { format!("  ·  {}", human_size(e.s)) };
+                        let text = egui::RichText::new(format!("{icon} {}{}", e.n, size))
+                            .monospace()
+                            .size(12.0)
+                            .color(if e.d { CYAN } else { TEXT });
+                        let resp = ui.selectable_label(selected, text);
+                        if resp.double_clicked() && e.d {
+                            action = Some(PanelAction::Nav(files::join_dir(cur_dir, &e.n)));
+                        } else if resp.clicked() {
+                            action = Some(PanelAction::Select(e.n.clone()));
+                        }
+                    }
+                });
+        });
+    action
+}
+
+/// Ventana "Transferencia de archivos": dos paneles + botones de transferencia
+/// + barra de progreso. La llama el viewport del visor cuando fmgr.open.
+fn draw_file_manager(ui: &mut egui::Ui, av: &mut ActiveViewer) {
+    let dc = av.shared.files_dc.lock().clone();
+    let files_ui = av.shared.files_ui.clone();
+
+    // Transferencia en curso / último aviso.
+    let progress = {
+        let p = files_ui.progress.lock();
+        p.as_ref().map(|t| (t.name.clone(), t.done, t.total, t.upload))
+    };
+    let busy = progress.is_some();
+
+    // Botones de transferencia (arriba, entre ambos paneles conceptualmente).
+    let sel_local_file = av.fmgr.local_sel.as_ref().and_then(|n| {
+        av.fmgr.local_entries.iter().find(|e| &e.n == n && !e.d).map(|e| e.n.clone())
+    });
+    let sel_remote_file = av.fmgr.remote_sel.as_ref().and_then(|n| {
+        av.fmgr.remote_entries.iter().find(|e| &e.n == n && !e.d).map(|e| e.n.clone())
+    });
+    ui.horizontal(|ui| {
+        let can_send = !busy && dc.is_some() && sel_local_file.is_some() && !av.fmgr.remote_dir.is_empty();
+        if primary(ui, "ENVIAR ▶", can_send, ACCENT_HI).on_hover_text("Enviar el archivo seleccionado de este equipo a la carpeta remota").clicked() {
+            if let (Some(dc), Some(name)) = (dc.clone(), sel_local_file.clone()) {
+                let local = std::path::PathBuf::from(files::join_dir(&av.fmgr.local_dir, &name));
+                files::upload_local(dc, local, av.fmgr.remote_dir.clone(), files_ui.clone());
+            }
         }
-    }
+        let can_recv = !busy && dc.is_some() && sel_remote_file.is_some() && !av.fmgr.local_dir.is_empty();
+        if primary(ui, "◀ RECIBIR", can_recv, CYAN).on_hover_text("Traer el archivo seleccionado del equipo remoto a la carpeta local").clicked() {
+            if let (Some(dc), Some(name)) = (dc.clone(), sel_remote_file.clone()) {
+                let remote = files::join_dir(&av.fmgr.remote_dir, &name);
+                files::fetch_remote(dc, remote, std::path::PathBuf::from(&av.fmgr.local_dir), files_ui.clone());
+            }
+        }
+        // Progreso o último aviso, a la derecha.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if let Some((name, done, total, upload)) = &progress {
+                let frac = if *total > 0 { *done as f32 / *total as f32 } else { 0.0 };
+                ui.add(
+                    egui::ProgressBar::new(frac)
+                        .desired_width(180.0)
+                        .text(egui::RichText::new(format!("{:.0}%", frac * 100.0)).monospace().size(10.0)),
+                );
+                let arrow = if *upload { "▶" } else { "◀" };
+                ui.label(egui::RichText::new(format!("{arrow} {name}")).monospace().size(11.0).color(AMBER));
+            } else if let Some(msg) = files_ui.last_msg.lock().clone() {
+                let c = if msg.starts_with('✓') { ACCENT_HI } else { REDC };
+                ui.label(egui::RichText::new(msg).monospace().size(11.0).color(c));
+            }
+        });
+    });
+    ui.add_space(6.0);
+
+    // Dos paneles lado a lado, cada uno con su color de sección.
+    let panel_h = (ui.available_height() - 8.0).max(160.0);
+    ui.columns(2, |cols| {
+        let mut local_action = None;
+        let mut remote_action = None;
+        cols[0].allocate_ui(egui::vec2(cols[0].available_width(), panel_h), |ui| {
+            ui.set_min_height(panel_h);
+            local_action = draw_panel(
+                ui,
+                "ESTE EQUIPO",
+                CYAN,
+                &av.fmgr.local_dir.clone(),
+                &av.fmgr.local_entries.clone(),
+                &av.fmgr.local_err.clone(),
+                &av.fmgr.local_sel.clone(),
+                false,
+            );
+        });
+        cols[1].allocate_ui(egui::vec2(cols[1].available_width(), panel_h), |ui| {
+            ui.set_min_height(panel_h);
+            remote_action = draw_panel(
+                ui,
+                "EQUIPO REMOTO",
+                ACCENT_HI,
+                &av.fmgr.remote_dir.clone(),
+                &av.fmgr.remote_entries.clone(),
+                &av.fmgr.remote_err.clone(),
+                &av.fmgr.remote_sel.clone(),
+                av.fmgr.remote_loading,
+            );
+        });
+        match local_action {
+            Some(PanelAction::Nav(d)) => av.fmgr.nav_local(d),
+            Some(PanelAction::Select(n)) => av.fmgr.local_sel = Some(n),
+            None => {}
+        }
+        match remote_action {
+            Some(PanelAction::Nav(d)) => {
+                if let Some(dc) = dc.clone() {
+                    av.fmgr.nav_remote(dc, d);
+                }
+            }
+            Some(PanelAction::Select(n)) => av.fmgr.remote_sel = Some(n),
+            None => {}
+        }
+    });
 }
 
 /// Selector de monitor (solo si el host tiene más de uno).
@@ -1644,6 +1936,65 @@ impl eframe::App for RemotixApp {
                     egui::CentralPanel::default().show(vctx, |ui| {
                         render_viewer(ui, vctx, av);
                     });
+
+                    // ---- Explorador de archivos (ventana flotante estilo TeamViewer) ----
+                    if av.fmgr.open {
+                        // Novedades del canal: listado remoto pedido y fin de transferencias.
+                        if let Some((path, res)) = av.shared.files_ui.remote_list.lock().take() {
+                            if path == av.fmgr.remote_dir {
+                                av.fmgr.remote_loading = false;
+                                av.fmgr.loading_since = None;
+                                match res {
+                                    Ok(e) => {
+                                        av.fmgr.remote_entries = e;
+                                        av.fmgr.remote_err = None;
+                                    }
+                                    Err(e) => {
+                                        av.fmgr.remote_entries.clear();
+                                        av.fmgr.remote_err = Some(e);
+                                    }
+                                }
+                            }
+                        }
+                        // Sin respuesta al `ls`: el agente remoto es de una versión
+                        // anterior sin explorador — mejor decirlo que girar eternamente.
+                        if av.fmgr.remote_loading {
+                            if let Some(t0) = av.fmgr.loading_since {
+                                if t0.elapsed() > Duration::from_secs(8) {
+                                    av.fmgr.remote_loading = false;
+                                    av.fmgr.loading_since = None;
+                                    av.fmgr.remote_err =
+                                        Some("sin respuesta: el equipo remoto usa una versión antigua de Remotix (actualízalo)".into());
+                                }
+                            }
+                        }
+                        let msg = av.shared.files_ui.last_msg.lock().clone();
+                        if msg != av.fmgr.last_msg_seen {
+                            // Transferencia recién terminada: refresca el panel receptor.
+                            if let Some(m) = &msg {
+                                if m.starts_with("✓ recibido") {
+                                    av.fmgr.refresh_local();
+                                } else if m.starts_with("✓ enviado") {
+                                    if let Some(dc) = av.shared.files_dc.lock().clone() {
+                                        let dir = av.fmgr.remote_dir.clone();
+                                        av.fmgr.nav_remote(dc, dir);
+                                    }
+                                }
+                            }
+                            av.fmgr.last_msg_seen = msg;
+                        }
+                        let mut open = true;
+                        egui::Window::new("📁 Transferencia de archivos")
+                            .open(&mut open)
+                            .default_size([760.0, 430.0])
+                            .min_size([520.0, 300.0])
+                            .resizable(true)
+                            .show(vctx, |ui| draw_file_manager(ui, av));
+                        if !open {
+                            av.fmgr.open = false;
+                        }
+                    }
+
                     if vctx.input(|i| i.viewport().close_requested()) {
                         close_viewer = true;
                     }

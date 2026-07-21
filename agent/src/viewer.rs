@@ -67,6 +67,8 @@ pub struct ViewerShared {
     pub closed: AtomicBool,
     /// Canal de archivos (lo crea el host); la GUI lo usa para enviar/pedir.
     pub files_dc: Mutex<Option<Arc<RTCDataChannel>>>,
+    /// Estado del explorador de archivos (listados remotos, progreso, avisos).
+    pub files_ui: Arc<crate::files::FilesUi>,
     /// Multimonitor: nº de monitores del host, monitor activo y canal de control.
     pub monitors: AtomicUsize,
     pub active_monitor: AtomicUsize,
@@ -248,7 +250,7 @@ async fn build_viewer_peer(
                     "control" => { *slot.lock() = Some(dc); }
                     "files" => {
                         *shared.files_dc.lock() = Some(dc.clone());
-                        crate::files::wire_files_channel(dc);
+                        crate::files::wire_files_channel_ui(dc, shared.files_ui.clone());
                     }
                     "meta" => {
                         *shared.meta_dc.lock() = Some(dc.clone());
