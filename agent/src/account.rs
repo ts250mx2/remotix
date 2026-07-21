@@ -23,6 +23,9 @@ pub struct DeviceInfo {
     pub access_key: String,
     #[serde(default)]
     pub os: Option<String>,
+    /// Versión del agente instalada en esa PC (la reporta en su hello).
+    #[serde(default)]
+    pub agent_version: Option<String>,
     #[serde(default)]
     pub online: bool,
     #[serde(default)]
