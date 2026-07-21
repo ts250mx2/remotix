@@ -1,6 +1,6 @@
 [package]
 name = "remotix-agent"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 description = "Remotix Windows agent — pantalla + control remoto vía WebRTC"
 license = "Proprietary"
