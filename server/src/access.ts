@@ -41,6 +41,8 @@ export interface AccessibleDevice {
   createdAt: Date;
   role: 'owner' | 'granted';
   online: boolean;
+  /// Comentario personal del usuario sobre esta PC (null = sin comentario).
+  note: string | null;
 }
 
 // Devices visibles para un usuario: los que posee + los que le concedieron
@@ -57,6 +59,12 @@ export async function listAccessibleDevices(userId: string): Promise<AccessibleD
 
   const granted = new Set<string>([...directIds, ...groupIds]);
 
+  // Comentarios personales del usuario (uno por device, si lo escribió).
+  const noteRows = await db.select({ deviceId: tables.deviceNotes.deviceId, note: tables.deviceNotes.note })
+    .from(tables.deviceNotes)
+    .where(eq(tables.deviceNotes.userId, userId));
+  const notes = new Map(noteRows.map((r) => [r.deviceId, r.note]));
+
   const all = await db.select().from(tables.devices);
   return all
     .filter((d) => d.ownerId === userId || granted.has(d.id))
@@ -72,5 +80,6 @@ export async function listAccessibleDevices(userId: string): Promise<AccessibleD
       createdAt: d.createdAt,
       role: (d.ownerId === userId ? 'owner' : 'granted') as 'owner' | 'granted',
       online: deviceHub.isOnline(d.id),
+      note: notes.get(d.id) ?? null,
     }));
 }

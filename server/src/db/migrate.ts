@@ -59,6 +59,18 @@ const STATEMENTS: string[] = [
 
   `CREATE INDEX device_access_principal_idx ON device_access(principal_id)`,
 
+  `CREATE TABLE IF NOT EXISTS device_notes (
+    device_id VARCHAR(40) NOT NULL,
+    user_id   VARCHAR(40) NOT NULL,
+    note VARCHAR(500) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (device_id, user_id),
+    FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id)   REFERENCES users(id)   ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE INDEX device_notes_user_idx ON device_notes(user_id)`,
+
   `CREATE TABLE IF NOT EXISTS sessions (
     token VARCHAR(64) PRIMARY KEY,
     user_id VARCHAR(40) NOT NULL,

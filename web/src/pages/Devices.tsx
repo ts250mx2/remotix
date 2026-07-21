@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, HttpError, type Device } from '../api/client';
 import { Layout } from '../components/Layout';
@@ -14,6 +14,10 @@ export function Devices() {
   const [error, setError] = useState<string | null>(null);
   const [keyInput, setKeyInput] = useState('');
   const [adding, setAdding] = useState(false);
+  const [query, setQuery] = useState('');
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [savingNoteId, setSavingNoteId] = useState<string | null>(null);
   const nav = useNavigate();
 
   async function load() {
@@ -21,6 +25,45 @@ export function Devices() {
     setDevices(devices);
   }
   useEffect(() => { void load(); }, []);
+
+  // Filtro de la lista: busca en nombre, comentario, sistema, hostname y clave
+  // (la clave ignora los guiones: "123456" encuentra "123-456-789").
+  const visible = useMemo(() => {
+    if (!devices) return null;
+    const q = query.trim().toLowerCase();
+    if (!q) return devices;
+    const qKey = q.replace(/[^0-9a-z]/g, '');
+    return devices.filter((d) =>
+      d.name.toLowerCase().includes(q)
+      || (d.note ?? '').toLowerCase().includes(q)
+      || (d.os ?? '').toLowerCase().includes(q)
+      || (d.hostname ?? '').toLowerCase().includes(q)
+      || (qKey !== '' && d.accessKey.toLowerCase().includes(qKey)),
+    );
+  }, [devices, query]);
+
+  // Guarda el comentario personal de una PC (vacío = borrarlo) y refresca.
+  // El cierre del editor se decide contra el id guardado: si mientras viajaba
+  // la petición el usuario abrió el editor de OTRA PC, ese editor no se toca
+  // (y su borrador tampoco; `startEditNote` siempre re-inicializa el draft).
+  async function saveNote(deviceId: string) {
+    setError(null);
+    setSavingNoteId(deviceId);
+    try {
+      await api.patch(`/api/devices/${deviceId}/note`, { note: noteDraft.trim() });
+      setEditingNoteId((id) => (id === deviceId ? null : id));
+      await load();
+    } catch {
+      setError('No se pudo guardar el comentario.');
+    } finally {
+      setSavingNoteId((id) => (id === deviceId ? null : id));
+    }
+  }
+
+  function startEditNote(d: Device) {
+    setEditingNoteId(d.id);
+    setNoteDraft(d.note ?? '');
+  }
 
   // Reserva una sesión con el equipo (le ordena compartir) y abre la consola.
   async function connect(d: Device) {
@@ -110,14 +153,54 @@ export function Devices() {
             <Link to="/operador">consola</Link>.
           </p>
         ) : (
+          <>
+            <input
+              className="device-search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="🔍 Buscar por nombre, comentario, clave o sistema…"
+            />
+            {visible !== null && visible.length === 0 ? (
+              <p className="muted">
+                Sin resultados para «{query.trim()}».{' '}
+                <button className="ghost" onClick={() => setQuery('')}>Limpiar búsqueda</button>
+              </p>
+            ) : (
           <table className="equipos">
             <thead>
-              <tr><th>Nombre</th><th>Clave</th><th>Estado</th><th>Sistema</th><th>Versión</th><th>Acceso</th><th></th></tr>
+              <tr><th>Nombre</th><th>Comentario</th><th>Clave</th><th>Estado</th><th>Sistema</th><th>Versión</th><th>Acceso</th><th></th></tr>
             </thead>
             <tbody>
-              {devices.map((d) => (
+              {(visible ?? []).map((d) => (
                 <tr key={d.id}>
                   <td><Link to={`/devices/${d.id}`}>💻 {d.name}</Link></td>
+                  <td className="note-cell">
+                    {editingNoteId === d.id ? (
+                      <form
+                        className="row note-form"
+                        onSubmit={(e) => { e.preventDefault(); void saveNote(d.id); }}
+                      >
+                        <input
+                          autoFocus
+                          value={noteDraft}
+                          maxLength={500}
+                          placeholder="Escribe un comentario…"
+                          onChange={(e) => setNoteDraft(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Escape') setEditingNoteId(null); }}
+                        />
+                        <button type="submit" disabled={savingNoteId === d.id}>{savingNoteId === d.id ? '…' : 'Guardar'}</button>
+                        <button type="button" className="ghost" onClick={() => setEditingNoteId(null)}>✕</button>
+                      </form>
+                    ) : (
+                      <button
+                        className="ghost notebtn"
+                        title="Comentario personal (solo lo ves tú) — clic para editar"
+                        onClick={() => startEditNote(d)}
+                      >
+                        {d.note ? d.note : '✎ añadir'}
+                      </button>
+                    )}
+                  </td>
                   <td className="mono small">{fmtKey(d.accessKey)}</td>
                   <td><span className={`pcstate ${d.online ? 'on' : ''}`}>{d.online ? 'En línea' : 'Desconectado'}</span></td>
                   <td>{d.os ?? '—'}</td>
@@ -142,6 +225,8 @@ export function Devices() {
               ))}
             </tbody>
           </table>
+            )}
+          </>
         )}
       </section>
     </Layout>

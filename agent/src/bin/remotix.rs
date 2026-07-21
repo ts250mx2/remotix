@@ -749,6 +749,7 @@ fn main() -> Result<()> {
         key_input: String::new(),
         key_copied_at: None,
         filter: String::new(),
+        note_edit: None,
         viewer: None,
         last_refresh: Instant::now(),
         server,
@@ -758,6 +759,9 @@ fn main() -> Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            // Abre maximizada por defecto; el inner_size queda como tamaño al
+            // restaurar (botón de restaurar / doble clic en la barra de título).
+            .with_maximized(true)
             .with_inner_size([780.0, 680.0])
             .with_min_inner_size([560.0, 520.0])
             .with_icon(std::sync::Arc::new(app_icon()))
@@ -923,6 +927,8 @@ enum Action {
     ToggleAutostart(bool),
     ToggleConfirm(bool),
     Update(UpdateInfo),
+    /// Guardar el comentario personal de una PC de la libreta (vacío = borrar).
+    SaveNote { id: String, note: String },
 }
 
 struct RemotixApp {
@@ -944,6 +950,8 @@ struct RemotixApp {
     key_copied_at: Option<Instant>,
     /// Filtro de búsqueda de la lista "Mis PCs".
     filter: String,
+    /// Comentario en edición: (id del device, texto). None = nadie editando.
+    note_edit: Option<(String, String)>,
     viewer: Option<ActiveViewer>,
     last_refresh: Instant,
     server: String,
@@ -1030,6 +1038,28 @@ impl RemotixApp {
                     *ui.error.lock() = Some("Tu sesión expiró; vuelve a iniciar sesión.".into());
                 }
                 Err(_) => {}
+            }
+        });
+    }
+
+    // Guarda el comentario personal de una PC en el servidor y refresca la
+    // libreta (así el comentario aparece/desaparece de inmediato).
+    fn do_save_note(&self, id: String, note: String) {
+        let account = self.account.clone();
+        let ui = self.ui.clone();
+        self.rt.spawn(async move {
+            let acc = account.lock().await;
+            match acc.set_note(&id, &note).await {
+                Ok(()) => {
+                    if let Ok(devs) = acc.devices().await {
+                        drop(acc);
+                        *ui.devices.lock() = devs;
+                    }
+                }
+                Err(e) => {
+                    drop(acc);
+                    *ui.error.lock() = Some(format!("No se pudo guardar el comentario: {e}"));
+                }
             }
         });
     }
@@ -1215,11 +1245,11 @@ impl RemotixApp {
                 });
                 ui.add_space(2.0);
                 hairline(ui, MAGENTA);
-                // Visible también si hay un filtro puesto, para poder quitarlo
-                // aunque la lista haya bajado de tamaño.
-                if devices.len() > 5 || !self.filter.is_empty() {
+                // Buscador siempre visible con PCs en la lista (y si hay un
+                // filtro puesto, para poder quitarlo aunque la lista se vacíe).
+                if !devices.is_empty() || !self.filter.is_empty() {
                     ui.add_space(6.0);
-                    ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("buscar…").desired_width(f32::INFINITY));
+                    ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("buscar nombre, comentario, clave…").desired_width(f32::INFINITY));
                 }
                 ui.add_space(10.0);
                 if devices.is_empty() {
@@ -1230,10 +1260,19 @@ impl RemotixApp {
                         ui.label(egui::RichText::new("Instala Remotix en otro equipo e inicia sesión ahí, o agrégala por su clave en el portal web.").size(11.5).color(MUTED));
                     });
                 }
+                // Busca en nombre, comentario, SO y clave (la clave ignora los
+                // guiones: "123456" encuentra "123-456-789").
                 let f = self.filter.trim().to_lowercase();
+                let fk: String = f.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
                 let shown: Vec<&DeviceInfo> = devices
                     .iter()
-                    .filter(|d| f.is_empty() || d.name.to_lowercase().contains(&f))
+                    .filter(|d| {
+                        f.is_empty()
+                            || d.name.to_lowercase().contains(&f)
+                            || d.note.as_deref().map(|n| n.to_lowercase().contains(&f)).unwrap_or(false)
+                            || d.os.as_deref().map(|o| o.to_lowercase().contains(&f)).unwrap_or(false)
+                            || (!fk.is_empty() && d.access_key.to_lowercase().contains(&fk))
+                    })
                     .collect();
                 if shown.is_empty() && !devices.is_empty() {
                     ui.horizontal(|ui| {
@@ -1313,6 +1352,49 @@ impl RemotixApp {
                                         ui.label(egui::RichText::new(format!("{sep}{vtxt}")).monospace().size(10.5).color(vc))
                                             .on_hover_text(hover);
                                     });
+                                    // Tercera línea: comentario personal de esta
+                                    // cuenta sobre la PC. Clic = editar en línea;
+                                    // Enter/✔ guarda, Esc/✕ cancela.
+                                    let editing = self.note_edit.as_ref().map_or(false, |(id, _)| id == &d.id);
+                                    if editing {
+                                        ui.horizontal(|ui| {
+                                            let (_, draft) = self.note_edit.as_mut().unwrap();
+                                            let resp = ui.add(
+                                                egui::TextEdit::singleline(draft)
+                                                    .hint_text("comentario…")
+                                                    .font(egui::TextStyle::Monospace)
+                                                    .desired_width(200.0),
+                                            );
+                                            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                            if ui.small_button("✔").on_hover_text("Guardar (Enter)").clicked() || enter {
+                                                if let Some((id, draft)) = self.note_edit.take() {
+                                                    action = Some(Action::SaveNote { id, note: draft.trim().to_string() });
+                                                }
+                                            } else if ui.small_button("✕").on_hover_text("Cancelar (Esc)").clicked()
+                                                || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                                            {
+                                                self.note_edit = None;
+                                            }
+                                        });
+                                    } else {
+                                        let note = d.note.clone().unwrap_or_default();
+                                        // Sin comentario: invitación muy apagada para
+                                        // no ensuciar la fila; con comentario: estilo
+                                        // "// nota" igual que el resto de la meta.
+                                        let (label, c) = if note.is_empty() {
+                                            ("+ comentario".to_string(), Color32::from_rgb(0x2E, 0x49, 0x38))
+                                        } else {
+                                            (format!("// {note}"), meta_c)
+                                        };
+                                        let r = ui.add(
+                                            egui::Label::new(egui::RichText::new(label).monospace().size(10.5).italics().color(c))
+                                                .truncate()
+                                                .sense(egui::Sense::click()),
+                                        );
+                                        if r.on_hover_text("Comentario personal (solo lo ves tú) — clic para editar").clicked() {
+                                            self.note_edit = Some((d.id.clone(), note));
+                                        }
+                                    }
                                 });
                             });
                         });
@@ -1374,9 +1456,13 @@ fn spawn_viewer(ui: &Arc<UiShared>, server: &str, code: String, name: String) {
     let http = to_http(server);
     let ws = to_ws(server, "/ws/signal");
     let shared2 = shared.clone();
+    let shared_err = shared.clone();
     tokio::spawn(async move {
         if let Err(e) = viewer::run_viewer_session(&http, &ws, &code, shared2, input_rx).await {
             warn!("visor: {e:#}");
+            // Muestra el error en la ventana (antes quedaba congelada en el
+            // último estado, p. ej. "Obteniendo configuración…", sin pista).
+            shared_err.set_status(format!("✗ {e:#}"));
         }
     });
     *ui.pending_viewer.lock() = Some(ActiveViewer {
@@ -1854,6 +1940,7 @@ impl eframe::App for RemotixApp {
             Some(Action::Logout) => {
                 self.password.clear();
                 self.filter.clear();
+                self.note_edit = None;
                 self.do_logout();
             }
             Some(Action::Connect(d)) => self.do_connect(d),
@@ -1870,6 +1957,7 @@ impl eframe::App for RemotixApp {
                 });
             }
             Some(Action::Update(info)) => self.do_update(info),
+            Some(Action::SaveNote { id, note }) => self.do_save_note(id, note),
             None => {}
         }
 

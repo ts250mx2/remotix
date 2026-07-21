@@ -410,6 +410,26 @@ button.danger:hover { background: rgba(255, 92, 87, 0.14); border-color: var(--d
 .equipos tbody tr:hover { background: rgba(61, 255, 132, 0.04); }
 .equipos tbody tr:last-child td { border-bottom: none; }
 
+/* Buscador de la lista de equipos */
+.device-search { margin-bottom: 12px; }
+
+/* Comentario personal por PC: se ve como texto apagado, clic para editar */
+.note-cell { max-width: 220px; }
+.notebtn {
+  padding: 4px 6px;
+  font-size: 12px;
+  font-weight: 400;
+  font-style: italic;
+  border-color: transparent;
+  text-align: left;
+  max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: inline-block;
+}
+.notebtn:hover { border-color: var(--border-2); }
+.note-form input { min-width: 140px; }
+.note-form button { padding: 5px 9px; font-size: 12px; }
+
 /* Acciones por fila (conectar + eliminar) */
 .row-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
 .iconbtn {

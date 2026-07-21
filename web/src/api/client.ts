@@ -42,6 +42,8 @@ export interface Device {
   agentVersion: string | null;
   lastSeenAt: string | null; createdAt: string;
   role: 'owner' | 'granted'; online: boolean;
+  /** Comentario personal del usuario sobre esta PC (cada usuario ve el suyo). */
+  note: string | null;
 }
 export interface DeviceGrant {
   principalId: string; kind: 'user' | 'group'; label: string; name?: string;

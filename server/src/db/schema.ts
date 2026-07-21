@@ -74,6 +74,22 @@ export const deviceAccess = mysqlTable(
   }),
 );
 
+// Comentario personal de un usuario sobre un device (libreta): cada usuario ve y
+// edita SOLO el suyo, aunque la PC esté compartida entre varias cuentas.
+export const deviceNotes = mysqlTable(
+  'device_notes',
+  {
+    deviceId: varchar('device_id', { length: 40 }).notNull().references(() => devices.id, { onDelete: 'cascade' }),
+    userId: varchar('user_id', { length: 40 }).notNull().references(() => users.id, { onDelete: 'cascade' }),
+    note: varchar('note', { length: 500 }).notNull(),
+    updatedAt: ts('updated_at').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.deviceId, t.userId] }),
+    userIdx: index('device_notes_user_idx').on(t.userId),
+  }),
+);
+
 export const sessions = mysqlTable(
   'sessions',
   {

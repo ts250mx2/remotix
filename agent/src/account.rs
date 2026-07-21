@@ -30,6 +30,9 @@ pub struct DeviceInfo {
     pub online: bool,
     #[serde(default)]
     pub role: String,
+    /// Comentario personal del usuario sobre esta PC (cada cuenta ve el suyo).
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Clone)]
@@ -113,6 +116,18 @@ impl Account {
         #[derive(Deserialize)]
         struct R { devices: Vec<DeviceInfo> }
         Ok(resp.json::<R>().await?.devices)
+    }
+
+    /// Guarda el comentario personal sobre una PC de la libreta (vacío = borrarlo).
+    pub async fn set_note(&self, device_id: &str, note: &str) -> Result<()> {
+        let url = format!("{}/api/devices/{}/note", self.base, device_id);
+        let mut req = self.http.patch(&url).json(&serde_json::json!({ "note": note }));
+        if let Some(c) = self.cookie() { req = req.header(reqwest::header::COOKIE, c); }
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("no se pudo guardar ({})", resp.status().as_u16()));
+        }
+        Ok(())
     }
 
     /// Reserva una sesión con el equipo (le ordena compartir) y devuelve el código

@@ -9,6 +9,7 @@ import { deviceHub } from '../devices/hub.js';
 import { reserveRemoteSession } from '../ws/signaling.js';
 
 const patchSchema = z.object({ name: z.string().min(1).max(120) });
+const noteSchema = z.object({ note: z.string().max(500) });
 const claimSchema = z.object({ accessKey: z.string().min(6).max(40) });
 const accessSchema = z.object({
   principalId: z.string().regex(/^(us|gp)_[0-9a-zA-Z]{22}$/),
@@ -65,6 +66,28 @@ export const deviceManageRoutes = new Hono()
       eq(tables.deviceAccess.deviceId, c.req.param('id')),
       eq(tables.deviceAccess.principalId, user.id),
     ));
+    return c.json({ ok: true });
+  })
+
+  // Comentario personal sobre una PC. Es POR USUARIO (cada quien ve/edita el
+  // suyo, no el de los demás), así que basta tener acceso al device — no hace
+  // falta ser dueño. Nota vacía = borrar el comentario.
+  .patch('/:id/note', zValidator('json', noteSchema), async (c) => {
+    const user = c.get('user');
+    const deviceId = c.req.param('id');
+    const role = await userCanAccessDevice(user.id, deviceId);
+    if (!role) return c.json({ error: 'forbidden' }, 403);
+    const note = c.req.valid('json').note.trim();
+    if (!note) {
+      await db.delete(tables.deviceNotes).where(and(
+        eq(tables.deviceNotes.deviceId, deviceId),
+        eq(tables.deviceNotes.userId, user.id),
+      ));
+    } else {
+      await db.insert(tables.deviceNotes)
+        .values({ deviceId, userId: user.id, note, updatedAt: new Date() })
+        .onDuplicateKeyUpdate({ set: { note, updatedAt: new Date() } });
+    }
     return c.json({ ok: true });
   })
 
