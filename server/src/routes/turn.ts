@@ -27,15 +27,15 @@ export function buildIceServers(): { iceServers: RTCIceServerLike[]; ttl: number
   if (env.turnHost && env.turnSecret) {
     const username = String(Math.floor(Date.now() / 1000) + env.turnTtl);
     const credential = createHmac('sha1', env.turnSecret).update(username).digest('base64');
-    iceServers.push({
-      urls: [
-        `turn:${env.turnHost}:${env.turnPort}?transport=udp`,
-        `turn:${env.turnHost}:${env.turnPort}?transport=tcp`,
-        `turns:${env.turnHost}:${env.turnsPort}?transport=tcp`,
-      ],
-      username,
-      credential,
-    });
+    const urls = [
+      `turn:${env.turnHost}:${env.turnPort}?transport=udp`,
+      `turn:${env.turnHost}:${env.turnPort}?transport=tcp`,
+    ];
+    // turns: (TLS) solo si está desplegado de verdad (TURNS_ENABLED=1): el
+    // coturn del compose no lleva certificado y el 5349 está cerrado — cada
+    // cliente perdía ~5 s de gather intentando contra un puerto muerto.
+    if (env.turnsEnabled) urls.push(`turns:${env.turnHost}:${env.turnsPort}?transport=tcp`);
+    iceServers.push({ urls, username, credential });
   }
 
   return { iceServers, ttl: env.turnTtl };

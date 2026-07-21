@@ -44,7 +44,7 @@ use webrtc::track::track_remote::TrackRemote;
 
 use crate::decode::H264Decoder;
 use crate::input::InputEvent;
-use crate::proto::{IceCandidate, IceServer, Incoming, Outgoing, Sdp, SignalPayload};
+use crate::proto::{IceCandidate, IceServer, Incoming, Outgoing, Sdp, SignalPayload, UrlsField};
 
 /// Tiempo máximo, desde que el operador se une, para que la conexión llegue a
 /// `Connected`. Si expira (el equipo no hospedó o el ICE no cruzó), el visor se
@@ -81,7 +81,10 @@ pub struct ViewerShared {
 }
 
 impl ViewerShared {
-    fn set_status(&self, s: impl Into<String>) {
+    /// Pública: la GUI también la usa para mostrar errores de la sesión (si la
+    /// tarea del visor muere antes de arrancar, el estado no debe quedarse
+    /// congelado en "Obteniendo configuración…" sin explicación).
+    pub fn set_status(&self, s: impl Into<String>) {
         *self.status.lock() = s.into();
     }
 }
@@ -101,7 +104,10 @@ fn send(out_tx: &mpsc::UnboundedSender<String>, msg: &Outgoing) {
 }
 
 /// Pide las credenciales ICE/TURN al servidor (el operador no las recibe por la
-/// señalización, a diferencia del host).
+/// señalización, a diferencia del host). Con timeout y un reintento; si aun así
+/// falla, devuelve STUN público de respaldo: sin TURN quizá no cruce redes muy
+/// restrictivas, pero con srflx la mayoría conecta — con SOLO candidatos host
+/// (lo que pasaba antes al fallar esto) jamás se cruza entre redes distintas.
 async fn fetch_ice(server_http: &str) -> Vec<IceServer> {
     #[derive(Deserialize)]
     struct Resp {
@@ -109,13 +115,28 @@ async fn fetch_ice(server_http: &str) -> Vec<IceServer> {
         ice_servers: Vec<IceServer>,
     }
     let url = format!("{}/api/turn-credentials", server_http.trim_end_matches('/'));
-    match reqwest::Client::new().get(url).send().await {
-        Ok(r) => r.json::<Resp>().await.map(|x| x.ice_servers).unwrap_or_default(),
-        Err(e) => {
-            warn!("no se pudieron obtener credenciales TURN: {e}");
-            Vec::new()
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    for intento in 1..=2u32 {
+        match client.get(&url).send().await {
+            Ok(r) => match r.json::<Resp>().await {
+                Ok(x) if !x.ice_servers.is_empty() => return x.ice_servers,
+                Ok(_) => {
+                    warn!("el servidor devolvió una lista ICE vacía");
+                    break;
+                }
+                Err(e) => warn!("credenciales TURN ilegibles (intento {intento}): {e}"),
+            },
+            Err(e) => warn!("no se pudieron obtener credenciales TURN (intento {intento}): {e}"),
         }
     }
+    warn!("sin ICE del servidor: usando STUN público de respaldo (sin TURN)");
+    vec![
+        IceServer { urls: UrlsField::One("stun:stun.l.google.com:19302".into()), username: None, credential: None },
+        IceServer { urls: UrlsField::One("stun:stun1.l.google.com:19302".into()), username: None, credential: None },
+    ]
 }
 
 /// Envía un PLI (Picture Loss Indication) por RTCP para pedir un keyframe.
@@ -362,8 +383,16 @@ pub async fn run_viewer_session(
     shared.set_status("Obteniendo configuración…");
     let ice_servers = fetch_ice(server_http).await;
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(signal_ws_url).await
-        .context("no se pudo conectar a la señalización")?;
+    // Con timeout explícito: un WS que no responde no debe dejar la ventana
+    // congelada en el estado anterior sin dar señales de vida.
+    shared.set_status("Conectando al servidor…");
+    let (ws_stream, _) = tokio::time::timeout(
+        Duration::from_secs(15),
+        tokio_tungstenite::connect_async(signal_ws_url),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("el servidor de señalización no respondió en 15 s (revisa tu internet o firewall)"))?
+    .context("no se pudo conectar a la señalización")?;
     let (mut ws_write, mut ws_read) = ws_stream.split();
 
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();

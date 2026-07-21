@@ -23,6 +23,10 @@ export const env = {
   turnSecret: process.env.TURN_SECRET ?? '',    // shared secret con coturn (use-auth-secret)
   turnPort: Number(process.env.TURN_PORT ?? 3478),
   turnsPort: Number(process.env.TURNS_PORT ?? 5349),
+  // Anunciar turns: (TURN sobre TLS) SOLO si coturn tiene certificado y el
+  // puerto está abierto; anunciarlo cerrado hace que cada cliente pierda ~5 s
+  // intentándolo en cada conexión.
+  turnsEnabled: process.env.TURNS_ENABLED === '1',
   turnTtl: Number(process.env.TURN_TTL ?? 3600), // segundos de validez de la credencial efímera
 };
 
