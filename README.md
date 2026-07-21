@@ -38,6 +38,13 @@ infra\build-agent.ps1 -Server https://tudominio.com -Sign
 > esté encendido), como el ID de TeamViewer. Mantenla privada; una contraseña adicional
 > por equipo es una mejora pendiente.
 
+**Pedir permiso antes de conectar** (opcional, por equipo): checkbox en la ventana del
+exe. Apagado por defecto (acceso desatendido puro). Activado, cada conexión entrante
+muestra en el equipo un diálogo "¿Permitir la conexión?" con 30 s para responder;
+rechazo o silencio → el técnico ve "el usuario rechazó la conexión". El valor se guarda
+en el servidor (columna `require_confirm`), así la ventana y el ayudante del servicio
+comparten el mismo estado.
+
 En ambos casos el usuario obtiene un **código de 6 caracteres** que le dicta al
 técnico; el técnico lo introduce en `/operador` y se conecta. Sin cuentas para
 el soporte instantáneo (el código es el secreto, estilo TeamViewer QuickSupport).

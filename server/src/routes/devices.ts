@@ -144,7 +144,9 @@ export const deviceManageRoutes = new Hono()
   })
 
   // Conectarse a un device por id (desde la libreta). Gate de acceso + reserva de
-  // sala de señalización; ordena al equipo compartir y devuelve el código.
+  // sala de señalización; ordena al equipo compartir y devuelve el código. Mismo
+  // contrato de confirmación que /api/device/connect: si el equipo tiene activado
+  // "pedir permiso", el flag viaja en el `start` y en la respuesta.
   .post('/:id/connect', async (c) => {
     const user = c.get('user');
     const deviceId = c.req.param('id');
@@ -152,9 +154,10 @@ export const deviceManageRoutes = new Hono()
     if (!role) return c.json({ error: 'forbidden' }, 403);
     if (!deviceHub.isOnline(deviceId)) return c.json({ error: 'offline' }, 409);
     const dev = (await db.select().from(tables.devices).where(eq(tables.devices.id, deviceId)))[0];
-    const code = reserveRemoteSession({ name: dev.name });
-    if (!deviceHub.sendToDevice(deviceId, { type: 'start', code })) {
+    const requireConfirm = !!dev.requireConfirm;
+    const code = reserveRemoteSession({ name: dev.name, deviceId: dev.id });
+    if (!deviceHub.sendToDevice(deviceId, { type: 'start', code, confirm: requireConfirm })) {
       return c.json({ error: 'offline' }, 409);
     }
-    return c.json({ code, name: dev.name });
+    return c.json({ code, name: dev.name, confirm: requireConfirm });
   });

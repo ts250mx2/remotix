@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { db, tables } from '../db/index.js';
 import { newId, newAccessKey, newAgentSecret } from '../ids.js';
-import { hashSecret } from '../auth/password.js';
+import { hashSecret, verifySecret } from '../auth/password.js';
 import { deviceHub } from '../devices/hub.js';
 import { reserveRemoteSession } from '../ws/signaling.js';
 
@@ -15,6 +15,11 @@ const registerSchema = z.object({
   machineId: z.string().max(80).optional(),
 });
 const connectSchema = z.object({ accessKey: z.string().min(6).max(40) });
+const confirmModeSchema = z.object({
+  deviceId: z.string().min(1).max(40),
+  secret: z.string().min(1).max(255),
+  value: z.boolean(),
+});
 
 function normalizeKey(k: string): string {
   return k.replace(/[^0-9A-Za-z]/g, '').toUpperCase();
@@ -54,9 +59,26 @@ export const deviceRoutes = new Hono()
     const dev = (await db.select().from(tables.devices).where(eq(tables.devices.accessKey, key)))[0];
     if (!dev) return c.json({ error: 'not_found' }, 404);
     if (!deviceHub.isOnline(dev.id)) return c.json({ error: 'offline' }, 409);
-    const code = reserveRemoteSession({ name: dev.name });
-    if (!deviceHub.sendToDevice(dev.id, { type: 'start', code })) {
+    const requireConfirm = !!dev.requireConfirm;
+    const code = reserveRemoteSession({ name: dev.name, deviceId: dev.id });
+    // `confirm: true` → el equipo pide permiso al usuario antes de hospedar; el
+    // operador recibe el flag para mostrar "esperando confirmación".
+    if (!deviceHub.sendToDevice(dev.id, { type: 'start', code, confirm: requireConfirm })) {
       return c.json({ error: 'offline' }, 409);
     }
-    return c.json({ code, name: dev.name });
+    return c.json({ code, name: dev.name, confirm: requireConfirm });
+  })
+
+  // Toggle "pedir permiso antes de conectar", cambiado desde el exe del equipo.
+  // Autentica con el secreto del propio device (misma credencial que el WS) y
+  // difunde el nuevo valor a todos sus procesos para sincronizar los checkboxes.
+  .post('/confirm-mode', zValidator('json', confirmModeSchema), async (c) => {
+    const { deviceId, secret, value } = c.req.valid('json');
+    const dev = (await db.select().from(tables.devices).where(eq(tables.devices.id, deviceId)))[0];
+    if (!dev || !(await verifySecret(secret, dev.secretHash))) {
+      return c.json({ error: 'auth_failed' }, 401);
+    }
+    await db.update(tables.devices).set({ requireConfirm: value }).where(eq(tables.devices.id, deviceId));
+    deviceHub.sendToDevice(deviceId, { type: 'confirm_mode', value });
+    return c.json({ ok: true, value });
   });

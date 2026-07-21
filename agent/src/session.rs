@@ -67,6 +67,9 @@ pub enum LiteEvent {
     Status(String),
     /// El servidor avisó (push por /ws/device) que hay una versión más nueva.
     UpdateAvailable,
+    /// Valor actual (según el servidor) del toggle "pedir permiso antes de
+    /// conectar". Llega en el `ready` y cada vez que alguien lo cambia.
+    ConfirmMode(bool),
 }
 
 /// Sesión estilo TeamViewer QuickSupport: hospeda SIN código (el server genera

@@ -61,8 +61,9 @@ fn server_host(s: &str) -> String {
 use egui::Color32;
 const BG: Color32 = Color32::BLACK;
 const PANEL: Color32 = Color32::BLACK;
-const CARD: Color32 = Color32::from_rgb(0x01, 0x04, 0x02);
-const CARD_HI: Color32 = Color32::from_rgb(0x07, 0x16, 0x0C);
+// Tarjetas NEUTRAS (sin tinte verde): el negro debe verse negro.
+const CARD: Color32 = Color32::from_rgb(0x04, 0x04, 0x04);
+const CARD_HI: Color32 = Color32::from_rgb(0x0A, 0x10, 0x0C);
 const BORDER: Color32 = Color32::from_rgb(0x14, 0x3B, 0x23);
 // Texto principal BLANCO suave (legible, fino); los acentos van en verde.
 const TEXT: Color32 = Color32::from_rgb(0xEC, 0xF4, 0xEE);
@@ -72,8 +73,14 @@ const ACCENT_HI: Color32 = Color32::from_rgb(0x53, 0xFF, 0x9C);
 const GREEN: Color32 = Color32::from_rgb(0x2E, 0xFF, 0x7B);
 const KEYC: Color32 = Color32::from_rgb(0x3D, 0xFF, 0x8E);
 const REDC: Color32 = Color32::from_rgb(0xFF, 0x5C, 0x5C);
-/// Brillo neón (sombra verde) para tarjetas y CTAs.
-const GLOW: Color32 = Color32::from_rgba_premultiplied(0, 60, 24, 40);
+// Paleta multicolor de terminal (alineada con la web): ámbar = claves/avisos,
+// cian = host/usuario/info, magenta = versión/acentos.
+const AMBER: Color32 = Color32::from_rgb(0xFF, 0xD2, 0x66);
+const CYAN: Color32 = Color32::from_rgb(0x5C, 0xD7, 0xFF);
+const MAGENTA: Color32 = Color32::from_rgb(0xFF, 0x7A, 0xC6);
+/// Brillo neón (sombra verde) para tarjetas y CTAs. Muy contenido: un halo
+/// apenas perceptible en el borde, no una niebla que tiña el fondo.
+const GLOW: Color32 = Color32::from_rgba_premultiplied(0, 36, 14, 20);
 
 /// Cursor de terminal: parpadeo ~1 Hz sincronizado con el reloj de egui.
 fn blink_on(ui: &egui::Ui) -> bool {
@@ -113,19 +120,20 @@ fn setup_style(ctx: &egui::Context) {
     style.spacing.button_padding = egui::vec2(14.0, 8.0);
     style.spacing.interact_size.y = 32.0;
     style.spacing.window_margin = Margin::same(0.0);
-    // Texto normal en la proporcional FINA (blanca); lo mono queda para los
-    // acentos de terminal (títulos [ ], claves, // comentarios, estado).
-    style.text_styles.insert(TextStyle::Heading, FontId::new(19.0, FontFamily::Proportional));
-    style.text_styles.insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
-    style.text_styles.insert(TextStyle::Button, FontId::new(14.0, FontFamily::Proportional));
-    style.text_styles.insert(TextStyle::Small, FontId::new(12.0, FontFamily::Proportional));
+    // UNA sola tipografía en toda la app: la mono de terminal (Cascadia).
+    // Leyendas, botones, checkboxes y claves comparten la misma fuente.
+    style.text_styles.insert(TextStyle::Heading, FontId::new(18.0, FontFamily::Monospace));
+    style.text_styles.insert(TextStyle::Body, FontId::new(13.5, FontFamily::Monospace));
+    style.text_styles.insert(TextStyle::Button, FontId::new(13.0, FontFamily::Monospace));
+    style.text_styles.insert(TextStyle::Small, FontId::new(11.5, FontFamily::Monospace));
     style.text_styles.insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
     ctx.set_style(style);
 }
 
-/// Tipografías: proporcional FINA (Segoe UI Semilight/Light) para el texto y
-/// Cascadia/Consolas para los acentos mono de terminal. Si algún archivo no
-/// existe se cae al siguiente candidato (y al final a la fuente de egui).
+/// Tipografía única de terminal (Cascadia/Consolas) para TODA la UI: se carga
+/// como primera opción tanto en la familia mono como en la proporcional, así
+/// cualquier texto —use el estilo que use— sale con la misma fuente. Si algún
+/// archivo no existe se cae al siguiente candidato (y al final a la de egui).
 fn load_system_fonts(ctx: &egui::Context) {
     use egui::{FontData, FontDefinitions, FontFamily};
     let mut fonts = FontDefinitions::default();
@@ -144,10 +152,9 @@ fn load_system_fonts(ctx: &egui::Context) {
             }
         }
     };
-    // OJO con los nombres de archivo de Segoe: segoeuisl = Semilight recto;
-    // seguisli = Semilight ITALIC (no confundir, inclina toda la UI).
-    load_first("ui-thin", &["segoeuisl.ttf", "segoeuil.ttf", "segoeui.ttf"], FontFamily::Proportional);
-    load_first("term", &["CascadiaMono.ttf", "CascadiaCode.ttf", "consola.ttf"], FontFamily::Monospace);
+    const TERM_FONTS: &[&str] = &["CascadiaMono.ttf", "CascadiaCode.ttf", "consola.ttf"];
+    load_first("term", TERM_FONTS, FontFamily::Monospace);
+    load_first("term-p", TERM_FONTS, FontFamily::Proportional);
     if any {
         ctx.set_fonts(fonts);
     }
@@ -164,17 +171,17 @@ fn normalize_key_input(s: &str) -> String {
     format_key(&clean)
 }
 
-/// Panel de terminal: fondo casi negro, borde verde de 1 px y glow neón.
+/// Panel de terminal: fondo casi negro, borde verde de 1 px y un halo mínimo.
 fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::none()
         .fill(CARD)
         .stroke(egui::Stroke::new(1.0, BORDER))
-        .rounding(egui::Rounding::same(4.0))
+        .rounding(egui::Rounding::same(6.0))
         .inner_margin(egui::Margin::same(18.0))
         .shadow(egui::epaint::Shadow {
             offset: egui::vec2(0.0, 0.0),
-            blur: 18.0,
-            spread: 1.0,
+            blur: 10.0,
+            spread: 0.0,
             color: GLOW,
         })
         .show(ui, |ui| {
@@ -183,27 +190,87 @@ fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
         });
 }
 
-/// Encabezado de sección estilo consola: `[ TITULO ]` mono verde + comentario
-/// `//` mono apagado (el cuerpo de las tarjetas va en la proporcional fina).
-fn card_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
-    ui.label(
-        egui::RichText::new(format!("[ {} ]", title.to_uppercase()))
-            .monospace()
-            .size(13.5)
-            .strong()
-            .color(ACCENT_HI),
-    );
-    ui.label(egui::RichText::new(format!("// {subtitle}")).monospace().size(10.5).color(MUTED));
-    ui.add_space(12.0);
+/// Estado del host, derivado del texto de estado del canal device. Alimenta el
+/// semáforo de las tarjetas y la barra de estado inferior.
+#[derive(Clone, Copy, PartialEq)]
+enum HostState {
+    /// Sin conexión al servidor (arrancando, registrando, reintentando).
+    Offline,
+    /// Hay un técnico conectado (o conectándose / esperando permiso).
+    Session,
+    /// En línea, listo para recibir conexiones.
+    Ready,
 }
 
-/// Botón secundario estilo consola: contorno verde fino, sin relleno.
-fn primary(ui: &mut egui::Ui, text: &str, enabled: bool) -> egui::Response {
+fn host_state(s: &str) -> HostState {
+    if s.contains("Conectado") || s.contains("ompart") || s.contains("écnico") || s.contains("respuesta") {
+        HostState::Session
+    } else if s.contains("línea") {
+        HostState::Ready
+    } else {
+        HostState::Offline
+    }
+}
+
+/// Semáforo FUNCIONAL (● ● ●): rojo = sin conexión, ámbar = técnico conectado,
+/// verde = en línea. Solo la luz del estado actual se enciende (con halo); las
+/// demás quedan apagadas, como un semáforo de verdad.
+fn traffic_lights(ui: &mut egui::Ui, state: HostState) {
+    let (r, resp) = ui.allocate_exact_size(egui::vec2(40.0, 12.0), egui::Sense::hover());
+    let p = ui.painter();
+    let y = r.center().y;
+    let lights = [
+        (Color32::from_rgb(0xFF, 0x5F, 0x57), HostState::Offline),
+        (Color32::from_rgb(0xFE, 0xBC, 0x2E), HostState::Session),
+        (Color32::from_rgb(0x28, 0xC8, 0x40), HostState::Ready),
+    ];
+    for (i, (c, s)) in lights.iter().enumerate() {
+        let pos = egui::pos2(r.left() + 4.0 + i as f32 * 14.0, y);
+        if *s == state {
+            p.circle_filled(pos, 6.5, c.gamma_multiply(0.28)); // halo encendido
+            p.circle_filled(pos, 4.0, *c);
+        } else {
+            p.circle_filled(pos, 4.0, c.gamma_multiply(0.13)); // luz apagada
+            p.circle_stroke(pos, 4.0, egui::Stroke::new(1.0, c.gamma_multiply(0.30)));
+        }
+    }
+    resp.on_hover_text("● rojo: sin conexión · ● ámbar: técnico conectado · ● verde: en línea");
+}
+
+/// Hairline horizontal a lo ancho, teñido con el acento de la sección.
+fn hairline(ui: &mut egui::Ui, color: Color32) {
+    let w = ui.available_width();
+    let (line, _) = ui.allocate_exact_size(egui::vec2(w, 1.0), egui::Sense::hover());
+    ui.painter().hline(line.x_range(), line.center().y, egui::Stroke::new(1.0, color.gamma_multiply(0.35)));
+}
+
+/// Encabezado de sección estilo ventana de terminal: semáforo (funcional, con
+/// el estado del host) + `[ TITULO ]` en el COLOR DE LA SECCIÓN, comentario
+/// `//` apagado y hairline teñido con el mismo acento.
+fn card_title(ui: &mut egui::Ui, state: HostState, accent: Color32, title: &str, subtitle: &str) {
+    ui.horizontal(|ui| {
+        traffic_lights(ui, state);
+        ui.label(
+            egui::RichText::new(format!("[ {} ]", title.to_uppercase()))
+                .monospace()
+                .size(13.5)
+                .strong()
+                .color(accent),
+        );
+    });
+    ui.label(egui::RichText::new(format!("// {subtitle}")).monospace().size(10.5).color(MUTED));
+    ui.add_space(2.0);
+    hairline(ui, accent);
+    ui.add_space(10.0);
+}
+
+/// Botón secundario estilo consola: contorno fino del color indicado, sin relleno.
+fn primary(ui: &mut egui::Ui, text: &str, enabled: bool, color: Color32) -> egui::Response {
     let btn = egui::Button::new(
-        egui::RichText::new(format!("[ {text} ]")).monospace().size(11.5).color(if enabled { ACCENT_HI } else { MUTED }),
+        egui::RichText::new(format!("[ {text} ]")).monospace().size(11.5).color(if enabled { color } else { MUTED }),
     )
     .fill(Color32::TRANSPARENT)
-    .stroke(egui::Stroke::new(1.0, if enabled { ACCENT } else { BORDER }))
+    .stroke(egui::Stroke::new(1.0, if enabled { color.gamma_multiply(0.75) } else { BORDER }))
     .rounding(egui::Rounding::same(3.0))
     .min_size(egui::vec2(0.0, 28.0));
     ui.add_enabled(enabled, btn)
@@ -256,6 +323,18 @@ fn dot(ui: &mut egui::Ui, color: Color32) {
 
 fn muted(s: &str) -> egui::RichText {
     egui::RichText::new(s).color(MUTED)
+}
+
+/// Color semántico del estado del visor: verde=conectado, rojo=error/cerrado,
+/// ámbar=cualquier estado intermedio (negociando, esperando, reconectando).
+fn status_color(s: &str) -> Color32 {
+    if s.contains("Conectado") {
+        ACCENT_HI
+    } else if s.contains("rror") || s.contains("rechaz") || s.contains("cerr") {
+        REDC
+    } else {
+        AMBER
+    }
 }
 
 /// Icono de la ventana: "pantalla" negra con marco y prompt verde neón (>_).
@@ -596,7 +675,7 @@ fn main() -> Result<()> {
 
     // Rol host: siempre activo (registra + presencia + acepta conexiones).
     let (host_tx, host_rx) = std::sync::mpsc::channel::<LiteEvent>();
-    rt.spawn(run_lite_unattended(server.clone(), name.clone(), host_tx));
+    rt.spawn(run_lite_unattended(server.clone(), name.clone(), host_tx.clone()));
 
     // Sesión persistida (login del usuario en este equipo).
     let saved = LiteConfig::load();
@@ -659,9 +738,11 @@ fn main() -> Result<()> {
         account,
         ui,
         host_rx,
+        host_tx,
         host_code: None,
         host_status: "Iniciando…".into(),
         autostart: autostart::is_autostart(),
+        require_confirm: false,
         email: email0,
         password: String::new(),
         key_input: String::new(),
@@ -749,6 +830,7 @@ enum Action {
     Connect(DeviceInfo),
     ConnectByKey(String),
     ToggleAutostart(bool),
+    ToggleConfirm(bool),
     Update(UpdateInfo),
 }
 
@@ -757,9 +839,13 @@ struct RemotixApp {
     account: Arc<tokio::sync::Mutex<Account>>,
     ui: Arc<UiShared>,
     host_rx: Receiver<LiteEvent>,
+    /// Para auto-enviarse eventos de host (p. ej. revertir el checkbox de
+    /// confirmación si el POST al servidor falla).
+    host_tx: std::sync::mpsc::Sender<LiteEvent>,
     host_code: Option<String>,
     host_status: String,
     autostart: bool,
+    require_confirm: bool,
     email: String,
     password: String,
     key_input: String,
@@ -900,11 +986,12 @@ impl RemotixApp {
     fn ui_connect_card(&mut self, ui: &mut egui::Ui) -> Option<Action> {
         let mut action = None;
         card(ui, |ui| {
-            card_title(ui, "Conectar a otra PC", "Escribe la clave del equipo remoto para verlo y controlarlo");
+            card_title(ui, host_state(&self.host_status), CYAN, "Conectar a otra PC", "Escribe la clave del equipo remoto para verlo y controlarlo");
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.key_input)
                     .hint_text("ABC-234-XYZ")
                     .font(egui::TextStyle::Monospace)
+                    .text_color(AMBER) // la clave tecleada se ve ámbar, como toda clave
                     .desired_width(f32::INFINITY)
                     .margin(egui::Margin::symmetric(12.0, 10.0)),
             );
@@ -929,7 +1016,14 @@ impl RemotixApp {
                 action = Some(Action::ConnectByKey(self.key_input.trim().to_string()));
             }
             ui.add_space(6.0);
-            ui.label(egui::RichText::new("// P2P · cifrado de extremo a extremo").monospace().size(11.0).color(MUTED));
+            // Leyenda multicolor: cada término con su color de sintaxis.
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.label(egui::RichText::new("// ").monospace().size(11.0).color(MUTED));
+                ui.label(egui::RichText::new("P2P").monospace().size(11.0).color(GREEN));
+                ui.label(egui::RichText::new(" · ").monospace().size(11.0).color(MUTED));
+                ui.label(egui::RichText::new("cifrado de extremo a extremo").monospace().size(11.0).color(CYAN));
+            });
         });
         action
     }
@@ -938,34 +1032,36 @@ impl RemotixApp {
     fn ui_host_card(&mut self, ui: &mut egui::Ui) -> Option<Action> {
         let mut action = None;
         card(ui, |ui| {
-            card_title(ui, "Este equipo", "Comparte esta clave con quien deba conectarse aquí");
+            card_title(ui, host_state(&self.host_status), ACCENT_HI, "Este equipo", "Comparte esta clave con quien deba conectarse aquí");
             match &self.host_code {
                 Some(c) => {
                     let key = format_key(c);
                     // Prompt con la clave y cursor de bloque parpadeante.
                     let mut copy_now = false;
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(">").monospace().size(26.0).color(MUTED));
+                        ui.label(egui::RichText::new("$").monospace().size(26.0).color(ACCENT));
                         let klabel = ui
                             .add(
                                 egui::Label::new(
-                                    egui::RichText::new(&key).monospace().size(29.0).strong().color(KEYC),
+                                    egui::RichText::new(&key).monospace().size(29.0).strong().color(AMBER),
                                 )
                                 .sense(egui::Sense::click()),
                             )
                             .on_hover_cursor(egui::CursorIcon::PointingHand)
                             .on_hover_text("Clic para copiar");
                         copy_now = klabel.clicked();
-                        let cur = if blink_on(ui) { KEYC } else { Color32::TRANSPARENT };
+                        let cur = if blink_on(ui) { AMBER } else { Color32::TRANSPARENT };
                         ui.label(egui::RichText::new("█").monospace().size(26.0).color(cur));
                     });
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         let copied = self.key_copied_at.map(|t| t.elapsed().as_millis() < 1600).unwrap_or(false);
                         let label = if copied { "[ COPIADA ✓ ]" } else { "[ COPIAR CLAVE ]" };
-                        let btn = egui::Button::new(egui::RichText::new(label).monospace().size(11.5).color(ACCENT_HI))
+                        // Cian normal; verde un instante como feedback de "copiada".
+                        let cc = if copied { ACCENT_HI } else { CYAN };
+                        let btn = egui::Button::new(egui::RichText::new(label).monospace().size(11.5).color(cc))
                             .fill(Color32::TRANSPARENT)
-                            .stroke(egui::Stroke::new(1.0, BORDER))
+                            .stroke(egui::Stroke::new(1.0, cc.gamma_multiply(0.55)))
                             .rounding(egui::Rounding::same(3.0))
                             .min_size(egui::vec2(130.0, 26.0));
                         copy_now |= ui.add(btn).clicked();
@@ -976,7 +1072,7 @@ impl RemotixApp {
                     }
                 }
                 None => {
-                    ui.label(egui::RichText::new("> ···-···-···").monospace().size(28.0).color(MUTED));
+                    ui.label(egui::RichText::new("$ ···-···-···").monospace().size(28.0).color(MUTED));
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("// obteniendo clave…").monospace().size(10.5).color(MUTED));
                 }
@@ -986,6 +1082,10 @@ impl RemotixApp {
             ui.add_space(4.0);
             if ui.checkbox(&mut self.autostart, "Iniciar con Windows").changed() {
                 action = Some(Action::ToggleAutostart(self.autostart));
+            }
+            // Toggle por equipo: por defecto APAGADO (acceso desatendido puro).
+            if ui.checkbox(&mut self.require_confirm, "Pedir permiso antes de conectar").changed() {
+                action = Some(Action::ToggleConfirm(self.require_confirm));
             }
             ui.label(egui::RichText::new("// al cerrar la ventana sigue activo en la bandeja").monospace().size(10.5).color(MUTED));
         });
@@ -1009,10 +1109,21 @@ impl RemotixApp {
             }
             if logged_in {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("[ MIS PCS ]").monospace().size(13.5).strong().color(ACCENT_HI));
+                    traffic_lights(ui, host_state(&self.host_status));
+                    ui.label(egui::RichText::new("[ MIS PCS ]").monospace().size(13.5).strong().color(MAGENTA));
                     let online = devices.iter().filter(|d| d.online).count();
-                    ui.label(egui::RichText::new(format!("{online}/{} online", devices.len())).monospace().size(11.0).color(MUTED));
+                    // Contador bicolor: los conectados en verde, el total apagado.
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.label(
+                        egui::RichText::new(format!("{online}"))
+                            .monospace()
+                            .size(11.0)
+                            .color(if online > 0 { GREEN } else { MUTED }),
+                    );
+                    ui.label(egui::RichText::new(format!("/{} online", devices.len())).monospace().size(11.0).color(MUTED));
                 });
+                ui.add_space(2.0);
+                hairline(ui, MAGENTA);
                 // Visible también si hay un filtro puesto, para poder quitarlo
                 // aunque la lista haya bajado de tamaño.
                 if devices.len() > 5 || !self.filter.is_empty() {
@@ -1052,7 +1163,7 @@ impl RemotixApp {
                         // truncado en el resto: jamás se enciman.
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if d.online {
-                                if primary(ui, "CONECTAR", true).clicked() {
+                                if primary(ui, "CONECTAR", true, ACCENT_HI).clicked() {
                                     action = Some(Action::Connect(d.clone()));
                                 }
                             } else {
@@ -1064,24 +1175,31 @@ impl RemotixApp {
                                     ui.spacing_mut().item_spacing.y = 2.0;
                                     ui.horizontal(|ui| {
                                         ui.add(egui::Label::new(egui::RichText::new(&d.name).size(14.0).strong().color(name_c)).truncate());
-                                        let role = if d.role == "owner" { "dueño" } else { "compartida" };
+                                        // Badge de rol coloreado: dueño=ámbar, compartida=cian
+                                        // (apagados si la PC está offline).
+                                        let (role, role_c) = if d.role == "owner" { ("dueño", AMBER) } else { ("compartida", CYAN) };
+                                        let role_c = if d.online { role_c } else { meta_c };
                                         egui::Frame::none()
-                                            .stroke(egui::Stroke::new(1.0, BORDER))
+                                            .stroke(egui::Stroke::new(1.0, if d.online { role_c.gamma_multiply(0.45) } else { BORDER }))
                                             .rounding(egui::Rounding::same(3.0))
                                             .inner_margin(egui::Margin::symmetric(6.0, 1.0))
                                             .show(ui, |ui| {
-                                                ui.label(egui::RichText::new(role).monospace().size(9.5).color(meta_c));
+                                                ui.label(egui::RichText::new(role).monospace().size(9.5).color(role_c));
                                             });
                                     });
-                                    let mut meta: Vec<String> = Vec::new();
-                                    if !d.access_key.is_empty() {
-                                        meta.push(format_key(&d.access_key));
-                                    }
-                                    if let Some(os) = &d.os {
-                                        meta.push(os.clone());
-                                    }
-                                    if !meta.is_empty() {
-                                        ui.label(egui::RichText::new(meta.join(" · ")).monospace().size(10.5).color(meta_c));
+                                    // Meta bicolor: la clave en ámbar (es una clave), el SO apagado.
+                                    if !d.access_key.is_empty() || d.os.is_some() {
+                                        ui.horizontal(|ui| {
+                                            ui.spacing_mut().item_spacing.x = 0.0;
+                                            if !d.access_key.is_empty() {
+                                                let key_c = if d.online { AMBER } else { meta_c };
+                                                ui.label(egui::RichText::new(format_key(&d.access_key)).monospace().size(10.5).color(key_c));
+                                            }
+                                            if let Some(os) = &d.os {
+                                                let sep = if d.access_key.is_empty() { "" } else { " · " };
+                                                ui.label(egui::RichText::new(format!("{sep}{os}")).monospace().size(10.5).color(meta_c));
+                                            }
+                                        });
                                     }
                                 });
                             });
@@ -1091,7 +1209,7 @@ impl RemotixApp {
                 }
             } else {
                 // ---- Iniciar sesión ----
-                card_title(ui, "Cuenta", "Inicia sesión para ver tus PCs guardadas y conectarte con un clic");
+                card_title(ui, host_state(&self.host_status), MAGENTA, "Cuenta", "Inicia sesión para ver tus PCs guardadas y conectarte con un clic");
                 ui.add(egui::TextEdit::singleline(&mut self.email).hint_text("correo electrónico").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(12.0, 9.0)));
                 ui.add_space(6.0);
                 let pw = ui.add(egui::TextEdit::singleline(&mut self.password).password(true).hint_text("contraseña").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(12.0, 9.0)));
@@ -1199,6 +1317,7 @@ impl eframe::App for RemotixApp {
             match ev {
                 LiteEvent::Code(c) => self.host_code = Some(c),
                 LiteEvent::Status(s) => self.host_status = s,
+                LiteEvent::ConfirmMode(v) => self.require_confirm = v,
                 // Push del servidor: versión nueva publicada → aplicar si inactiva.
                 LiteEvent::UpdateAvailable => {
                     let server = self.server.clone();
@@ -1270,7 +1389,7 @@ impl eframe::App for RemotixApp {
                     // Cursor de terminal parpadeando junto al wordmark.
                     let cur = if blink_on(ui) { KEYC } else { Color32::TRANSPARENT };
                     ui.label(egui::RichText::new("█").monospace().size(13.0).color(cur));
-                    ui.label(egui::RichText::new(format!("v{}", update::CURRENT_VERSION)).monospace().size(10.5).color(MUTED));
+                    ui.label(egui::RichText::new(format!("v{}", update::CURRENT_VERSION)).monospace().size(10.5).color(MAGENTA));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if let Some(u) = &user {
                             // Botón fantasma: salir no debe competir con los CTAs reales.
@@ -1282,8 +1401,9 @@ impl eframe::App for RemotixApp {
                             }
                             ui.add_space(6.0);
                             ui.add(
-                                egui::Label::new(egui::RichText::new(format!("usr: {}", u.name)).monospace().size(11.5).color(TEXT)).truncate(),
+                                egui::Label::new(egui::RichText::new(u.name.clone()).monospace().size(11.5).color(CYAN)).truncate(),
                             );
+                            ui.label(egui::RichText::new("usr:").monospace().size(11.5).color(MAGENTA));
                         }
                     });
                 });
@@ -1302,10 +1422,10 @@ impl eframe::App for RemotixApp {
                 .frame(egui::Frame::none().fill(Color32::from_rgb(0x06, 0x1E, 0x10)).inner_margin(egui::Margin::symmetric(18.0, 8.0)))
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(format!("[UPDATE] v{} disponible", info.version)).monospace().strong().color(KEYC));
+                        ui.label(egui::RichText::new(format!("[UPDATE] v{} disponible", info.version)).monospace().strong().color(AMBER));
                         ui.label(egui::RichText::new("// se instala y reinicia sola").monospace().size(10.5).color(MUTED));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if primary(ui, "ACTUALIZAR", true).clicked() {
+                            if primary(ui, "ACTUALIZAR", true, AMBER).clicked() {
                                 action = Some(Action::Update(info.clone()));
                             }
                         });
@@ -1318,19 +1438,25 @@ impl eframe::App for RemotixApp {
             .frame(egui::Frame::none().fill(PANEL).inner_margin(egui::Margin::symmetric(18.0, 7.0)))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-    let s = self.host_status.clone();
-                    let online = s.contains("línea") || s.contains("Conectado") || s.contains("ompart");
-                    dot(ui, if online { GREEN } else { MUTED });
+                    let s = self.host_status.clone();
+                    // Misma semántica que el semáforo de las tarjetas:
+                    // verde=en línea, ámbar=técnico conectado, rojo=sin conexión.
+                    let (word, color, dcolor) = match host_state(&s) {
+                        HostState::Ready => ("ONLINE", ACCENT_HI, GREEN),
+                        HostState::Session => ("SESIÓN", AMBER, AMBER),
+                        HostState::Offline => ("OFFLINE", REDC, REDC),
+                    };
+                    dot(ui, dcolor);
                     // Sin redundancia: el "En línea · " del estado ya lo dice ONLINE.
-                    let detail = s.strip_prefix("En línea · ").unwrap_or(&s);
-                    ui.label(
-                        egui::RichText::new(format!("{} :: {}", if online { "ONLINE" } else { "OFFLINE" }, detail))
-                            .monospace()
-                            .size(11.0)
-                            .color(if online { ACCENT_HI } else { MUTED }),
-                    );
+                    let detail = s.strip_prefix("En línea · ").unwrap_or(&s).to_string();
+                    // Segmentos coloreados: la palabra de estado con su color, el
+                    // separador apagado y el detalle en texto normal.
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.label(egui::RichText::new(word).monospace().size(11.0).strong().color(color));
+                    ui.label(egui::RichText::new(" :: ").monospace().size(11.0).color(MUTED));
+                    ui.label(egui::RichText::new(detail).monospace().size(11.0).color(TEXT));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(format!("@{}", server_host(&self.server))).monospace().size(11.0).color(MUTED));
+                        ui.label(egui::RichText::new(format!("@{}", server_host(&self.server))).monospace().size(11.0).color(CYAN));
                     });
                 });
                 // Línea divisoria de consola al borde superior del pie.
@@ -1345,16 +1471,8 @@ impl eframe::App for RemotixApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(BG).inner_margin(egui::Margin::same(18.0)))
             .show(ctx, |ui| {
-                // Scanlines sutiles de CRT sobre el fondo (las tarjetas van encima).
-                {
-                    let r = ui.clip_rect();
-                    let p = ui.painter();
-                    let mut y = r.top();
-                    while y < r.bottom() {
-                        p.hline(r.x_range(), y, egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(0, 255, 120, 4)));
-                        y += 3.0;
-                    }
-                }
+                // Fondo NEGRO PURO, sin scanlines ni texturas: el color lo ponen
+                // las letras, no el fondo.
                 // Borde inferior visible del panel: referencia para que [MIS PCS]
                 // llene el alto disponible al maximizar.
                 let panel_bottom = ui.max_rect().bottom();
@@ -1445,6 +1563,16 @@ impl eframe::App for RemotixApp {
             Some(Action::Connect(d)) => self.do_connect(d),
             Some(Action::ConnectByKey(k)) => { self.key_input.clear(); self.do_connect_by_key(k); }
             Some(Action::ToggleAutostart(v)) => { let _ = autostart::set_autostart(v); }
+            // El valor real vive en el servidor; si el POST falla se revierte el
+            // checkbox mandándose a sí mismo el valor anterior.
+            Some(Action::ToggleConfirm(v)) => {
+                let tx = self.host_tx.clone();
+                self.rt.spawn(async move {
+                    if remotix_agent::device::set_confirm_mode(v).await.is_err() {
+                        let _ = tx.send(LiteEvent::ConfirmMode(!v));
+                    }
+                });
+            }
             Some(Action::Update(info)) => self.do_update(info),
             None => {}
         }
@@ -1475,7 +1603,9 @@ impl eframe::App for RemotixApp {
                             .show(vctx, |ui| {
                                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new(av.shared.status.lock().clone()).small().weak());
+                                        let s = av.shared.status.lock().clone();
+                                        let c = status_color(&s);
+                                        ui.label(egui::RichText::new(format!("● {s}")).monospace().size(11.0).color(c));
                                         ui.separator();
                                         if ui.button("🗗 Restaurar").clicked() {
                                             av.fullscreen = false;
@@ -1495,7 +1625,9 @@ impl eframe::App for RemotixApp {
                         egui::TopBottomPanel::top("vstat").show(vctx, |ui| {
                             ui.add_space(2.0);
                             ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new(av.shared.status.lock().clone()).weak());
+                                let s = av.shared.status.lock().clone();
+                                let c = status_color(&s);
+                                ui.label(egui::RichText::new(format!("● {s}")).monospace().size(12.0).color(c));
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     if ui.button("⛶ Pantalla completa").clicked() {
                                         av.fullscreen = true;
@@ -1542,7 +1674,12 @@ fn render_viewer(ui: &mut egui::Ui, vctx: &egui::Context, av: &mut ActiveViewer)
     }
 
     let Some(tex) = av.tex.as_ref() else {
-        ui.centered_and_justified(|ui| { ui.label(av.shared.status.lock().clone()); });
+        // Aún sin vídeo: estado grande estilo terminal, coloreado por fase.
+        let s = av.shared.status.lock().clone();
+        let c = status_color(&s);
+        ui.centered_and_justified(|ui| {
+            ui.label(egui::RichText::new(format!("> {s}")).monospace().size(16.0).color(c));
+        });
         return;
     };
     let (tw, th) = (av.size[0] as f32, av.size[1] as f32);

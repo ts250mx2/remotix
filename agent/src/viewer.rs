@@ -412,7 +412,16 @@ pub async fn run_viewer_session(
                     Incoming::Waiting => shared.set_status("Conectando con el equipo…"),
                     Incoming::Signal { payload } => handle_signal(&pc, payload, &out_tx, &mut remote_set, &mut pending).await,
                     Incoming::PeerLeft => { shared.set_status("El equipo cerró la sesión."); break; }
-                    Incoming::Error { code } => { shared.set_status(format!("Error: {code}")); break; }
+                    Incoming::Error { code } => {
+                        let msg = match code.as_str() {
+                            // Modo "pedir permiso": el usuario del equipo dijo que no
+                            // (o nadie respondió al diálogo a tiempo).
+                            "declined" => "El usuario del equipo rechazó la conexión.".to_string(),
+                            c => format!("Error: {c}"),
+                        };
+                        shared.set_status(msg);
+                        break;
+                    }
                     _ => {}
                 }
             }

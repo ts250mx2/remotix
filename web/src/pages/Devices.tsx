@@ -27,8 +27,9 @@ export function Devices() {
     setError(null);
     setBusy(d.id);
     try {
-      const { code } = await api.post<{ code: string }>(`/api/devices/${d.id}/connect`);
-      nav(`/operador?code=${encodeURIComponent(code)}`);
+      const { code, confirm } = await api.post<{ code: string; confirm?: boolean }>(`/api/devices/${d.id}/connect`);
+      // `confirm=1` → la consola muestra "esperando que el usuario acepte…".
+      nav(`/operador?code=${encodeURIComponent(code)}${confirm ? '&confirm=1' : ''}`);
     } catch (err) {
       if (err instanceof HttpError && err.status === 409) setError(`${d.name} no está en línea.`);
       else if (err instanceof HttpError && err.status === 403) setError(`No tienes acceso a ${d.name}.`);

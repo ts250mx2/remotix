@@ -31,6 +31,9 @@ interface Session {
   issue?: string;
   mode: 'share' | 'agent';    // 'share' = pantalla de navegador (solo ver), 'agent' = control total
   caps: string[];             // capacidades del host, ej: ['control']
+  // Equipo (dv_*) para el que se reservó la sala vía /api/device/connect. Solo
+  // ese equipo puede rechazarla (modo "pedir permiso antes de conectar").
+  deviceId?: string;
   createdAt: number;
 }
 
@@ -65,7 +68,7 @@ function genCode(): string {
 
 /** Reserva una sala de señalización con un código único para una sesión remota
  * lanzada desde el chat. El PC luego hace `host` con ese código y se adjunta. */
-export function reserveRemoteSession(opts: { name?: string }): string {
+export function reserveRemoteSession(opts: { name?: string; deviceId?: string }): string {
   const code = genCode();
   SESSIONS.set(code, {
     code,
@@ -74,9 +77,23 @@ export function reserveRemoteSession(opts: { name?: string }): string {
     name: opts.name,
     mode: 'share',
     caps: [],
+    deviceId: opts.deviceId,
     createdAt: Date.now(),
   });
   return code;
+}
+
+/** El equipo rechazó (o dejó expirar) la petición de conexión con confirmación:
+ * avisa al operador que espera en la sala y la elimina. Solo aplica si la sala
+ * se reservó para ese mismo equipo y nadie llegó a hospedarla. */
+export function declineRemoteSession(code: string, deviceId: string): void {
+  const session = SESSIONS.get(code.trim().toUpperCase());
+  if (!session || session.deviceId !== deviceId) return;
+  // Si otro proceso del equipo ya aceptó y está hospedando, el rechazo tardío
+  // de un proceso perdedor no debe tumbar la sesión viva.
+  if (session.client && session.client.readyState === session.client.OPEN) return;
+  send(session.operator, { t: 'error', code: 'declined' });
+  dropSession(session);
 }
 
 function send(ws: WebSocket | null | undefined, msg: unknown): void {

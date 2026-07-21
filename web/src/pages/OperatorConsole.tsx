@@ -45,6 +45,9 @@ export function OperatorConsole() {
   const { filesReady, transfers, received, requested, clearRequested, fileHandlers } = useFileTransfers();
 
   const connRef = useRef<SupportConnection | null>(null);
+  // Conexión por clave a un equipo con "pedir permiso" activado: mientras sea
+  // true, el estado de espera dice que falta la aceptación del usuario.
+  const confirmPendingRef = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fullscreenRef = useRef<HTMLDivElement>(null);
   const lastMoveRef = useRef(0);
@@ -82,12 +85,14 @@ export function OperatorConsole() {
     };
   }, [controlling, send]);
 
-  // Auto-conexión cuando el técnico lanza la sesión desde el chat (?code=...).
+  // Auto-conexión cuando el técnico lanza la sesión desde el chat o la libreta
+  // de equipos (?code=...&confirm=1 si el equipo pide permiso al usuario).
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search).get('code');
+    const params = new URLSearchParams(window.location.search);
+    const p = params.get('code');
     if (p) {
       setCode(p.toUpperCase());
-      connectWith(p);
+      connectWith(p, params.get('confirm') === '1');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -103,7 +108,7 @@ export function OperatorConsole() {
         method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ accessKey: entered }),
       });
-      if (res.ok) { const data = await res.json(); connectWith(data.code); return; }
+      if (res.ok) { const data = await res.json(); connectWith(data.code, !!data.confirm); return; }
       if (res.status === 401) { setError('Inicia sesión para conectarte a un equipo por su clave.'); return; }
       if (res.status === 403) { setError('No tienes acceso a ese equipo.'); return; }
       if (res.status === 409) { setError('Ese equipo no está en línea en este momento.'); return; }
@@ -112,16 +117,26 @@ export function OperatorConsole() {
     connectWith(entered);
   }
 
-  function connectWith(rawCode: string) {
+  function connectWith(rawCode: string, needsConfirm = false) {
     setError(null);
     const normalized = rawCode.trim().toUpperCase();
     if (!normalized) return;
+    confirmPendingRef.current = needsConfirm;
 
     const conn = new SupportConnection(
       'operator',
       {
         onStatus: (s) => setStatus(s),
+        // Sala reservada, el equipo aún no hospeda: en modo desatendido es un
+        // instante; con confirmación puede tardar hasta que el usuario acepte.
+        onWaiting: () =>
+          setStatus(
+            confirmPendingRef.current
+              ? 'Esperando que el usuario acepte la conexión en el equipo remoto…'
+              : 'Conectando con el equipo…',
+          ),
         onPeerJoined: (meta) => {
+          confirmPendingRef.current = false;
           setClientMeta({ name: meta.name, issue: meta.issue });
           setMode(meta.mode ?? 'share');
           setClientPresent(true);
@@ -144,7 +159,7 @@ export function OperatorConsole() {
         },
         onError: (c) => {
           setError(errorText(c));
-          if (c === 'not_found' || c === 'busy') setPhase('enter-code');
+          if (c === 'not_found' || c === 'busy' || c === 'declined') setPhase('enter-code');
         },
         onClosed: () => setStatus('Conexión cerrada.'),
         ...fileHandlers,

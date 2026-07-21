@@ -46,6 +46,7 @@ export interface ConnectionHandlers {
   onFileReceived?: (file: ReceivedFile) => void; // archivo entrante completo
   onFileRequested?: () => void;                // el peer pide que enviemos un archivo
   onShareEnded?: () => void;                   // cliente: dejó de compartir pantalla
+  onWaiting?: () => void;                      // operador: sala reservada, el equipo aún no se une
   onError?: (code: string) => void;
   onClosed?: () => void;
 }
@@ -320,9 +321,12 @@ export class SupportConnection {
         break;
 
       case 'waiting':
-        // (operador) sala reservada: el equipo se une solo al recibir el `start`
-        // (sin intervención del usuario); esto es solo el instante intermedio.
-        this.handlers.onStatus?.('Conectando con el equipo…');
+        // (operador) sala reservada: el equipo se une al recibir el `start` —
+        // al instante en modo desatendido, o cuando el usuario acepte si el
+        // equipo tiene activado "pedir permiso antes de conectar". onWaiting
+        // permite a la consola distinguir ambos textos.
+        if (this.handlers.onWaiting) this.handlers.onWaiting();
+        else this.handlers.onStatus?.('Conectando con el equipo…');
         break;
 
       case 'peer-left':
@@ -481,6 +485,8 @@ export function errorText(code: string): string {
   switch (code) {
     case 'not_found':
       return 'No existe una sesión con ese código. Verifícalo con el usuario.';
+    case 'declined':
+      return 'El usuario del equipo rechazó la conexión (o nadie la aceptó a tiempo).';
     case 'busy':
       return 'Esa sesión ya tiene un técnico conectado.';
     case 'server_busy':

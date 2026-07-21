@@ -145,25 +145,46 @@ async fn connect_once(
 ) -> anyhow::Result<()> {
     let (ws, _) = tokio_tungstenite::connect_async(cfg.ws_device_url()).await?;
     let (mut w, mut r) = ws.split();
-    w.send(Message::Text(serde_json::json!({
+
+    // Escritor único del socket: el hello y los mensajes que nacen en tareas
+    // asíncronas (p. ej. `declined` desde el prompt de confirmación) comparten
+    // esta misma conexión autenticada.
+    let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    tokio::spawn(async move {
+        while let Some(text) = out_rx.recv().await {
+            if w.send(Message::Text(text)).await.is_err() { break; }
+        }
+    });
+    let _ = out_tx.send(serde_json::json!({
         "type": "hello",
         "deviceId": cfg.device_id,
         "secret": cfg.secret,
         "version": crate::update::CURRENT_VERSION,
-    }).to_string())).await?;
+    }).to_string());
 
     loop {
         match r.next().await {
             Some(Ok(Message::Text(text))) => {
                 let m: serde_json::Value = match serde_json::from_str(&text) { Ok(v) => v, Err(_) => continue };
                 match m.get("type").and_then(|v| v.as_str()) {
-                    Some("ready") => { let _ = ui.send(LiteEvent::Status("En línea · listo para recibir conexiones".into())); }
+                    Some("ready") => {
+                        let confirm = m.get("requireConfirm").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let _ = ui.send(LiteEvent::ConfirmMode(confirm));
+                        let _ = ui.send(LiteEvent::Status("En línea · listo para recibir conexiones".into()));
+                    }
                     Some("error") => { warn!("device auth: {text}"); anyhow::bail!("auth_failed"); }
                     // Push del servidor: hay versión nueva publicada. La GUI (o el
                     // servicio, según el binario) decide cuándo aplicarla.
                     Some("update") => { let _ = ui.send(LiteEvent::UpdateAvailable); }
+                    // Alguien cambió el toggle de confirmación (desde esta ventana u
+                    // otro proceso del equipo): sincroniza el checkbox de la GUI.
+                    Some("confirm_mode") => {
+                        let v = m.get("value").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let _ = ui.send(LiteEvent::ConfirmMode(v));
+                    }
                     Some("start") => {
                         let code = m.get("code").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let confirm = m.get("confirm").and_then(|v| v.as_bool()).unwrap_or(false);
                         if code.is_empty() || busy.swap(true, Ordering::SeqCst) { continue; }
                         // Marca sesión activa: el servicio no auto-actualizará mientras dure.
                         crate::update::set_session_active(true);
@@ -171,7 +192,30 @@ async fn connect_once(
                         let name = name.to_string();
                         let ui2 = ui.clone();
                         let busy2 = busy.clone();
+                        let out2 = out_tx.clone();
                         tokio::spawn(async move {
+                            // Modo "pedir permiso": el usuario del equipo debe aceptar
+                            // antes de hospedar. Rechazo o timeout → se avisa al server
+                            // (que informa al operador) y no se comparte nada.
+                            if confirm {
+                                match ask_permission(&ui2).await {
+                                    ConfirmOutcome::Accepted => {}
+                                    ConfirmOutcome::Declined => {
+                                        let _ = out2.send(serde_json::json!({ "type": "declined", "code": code }).to_string());
+                                        busy2.store(false, Ordering::SeqCst);
+                                        crate::update::set_session_active(false);
+                                        let _ = ui2.send(LiteEvent::Status("En línea · listo para recibir conexiones".into()));
+                                        return;
+                                    }
+                                    // Otro proceso del equipo tiene el diálogo: él decide
+                                    // (y hospeda si aceptan); este proceso se retira.
+                                    ConfirmOutcome::Delegated => {
+                                        busy2.store(false, Ordering::SeqCst);
+                                        crate::update::set_session_active(false);
+                                        return;
+                                    }
+                                }
+                            }
                             // Estado honesto: el visor lo actualizará a "Conectado"
                             // solo cuando WebRTC lo confirme (dentro de run_remote_session).
                             let _ = ui2.send(LiteEvent::Status("El técnico se está conectando…".into()));
@@ -192,5 +236,113 @@ async fn connect_once(
         }
     }
     info!("device WS cerrado");
+    Ok(())
+}
+
+/// Tiempo que se le da al usuario para responder al diálogo de confirmación.
+/// Sin respuesta (nadie frente al equipo) se rechaza: "pedir permiso" implica
+/// que sin alguien que apruebe no hay acceso.
+const CONFIRM_TIMEOUT: Duration = Duration::from_secs(30);
+
+enum ConfirmOutcome {
+    Accepted,
+    Declined,
+    /// Otro proceso del mismo equipo ya está mostrando el diálogo.
+    Delegated,
+}
+
+/// Un único diálogo vivo por proceso. El diálogo nativo no puede cerrarse desde
+/// fuera: si expiró el timeout queda "huérfano" hasta que alguien lo cierre, con
+/// su hilo bloqueado. Este flag evita abrir otro mientras tanto (las peticiones
+/// nuevas se rechazan directas), acotando a 1 los popups/hilos por proceso en un
+/// equipo sin nadie delante que reciba intentos repetidos.
+static PROMPT_LIVE: AtomicBool = AtomicBool::new(false);
+
+/// Muestra el diálogo nativo "¿Permitir la conexión?" con timeout. El mutex con
+/// nombre evita diálogos duplicados cuando la ventana y el ayudante del servicio
+/// reciben el mismo `start` (solo el primero pregunta; el resto delega).
+async fn ask_permission(ui: &std::sync::mpsc::Sender<LiteEvent>) -> ConfirmOutcome {
+    #[cfg(windows)]
+    let _guard = match PromptGuard::acquire() {
+        Some(g) => g,
+        None => return ConfirmOutcome::Delegated,
+    };
+    if PROMPT_LIVE.swap(true, Ordering::SeqCst) {
+        // Hay un diálogo anterior sin responder: no apilar otro.
+        return ConfirmOutcome::Declined;
+    }
+
+    let _ = ui.send(LiteEvent::Status("Un técnico pide conectarse · esperando tu respuesta…".into()));
+    let dialog = tokio::task::spawn_blocking(|| {
+        let r = rfd::MessageDialog::new()
+            .set_title("Remotix")
+            .set_level(rfd::MessageLevel::Info)
+            .set_description("Un técnico quiere conectarse a este equipo para verlo y controlarlo.\n\n¿Permitir la conexión?")
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+        // Lo limpia el propio hilo del diálogo: aunque la sesión ya se haya
+        // rechazado por timeout, hasta aquí el popup seguía vivo.
+        PROMPT_LIVE.store(false, Ordering::SeqCst);
+        matches!(r, rfd::MessageDialogResult::Yes)
+    });
+    tokio::select! {
+        r = dialog => if r.unwrap_or(false) { ConfirmOutcome::Accepted } else { ConfirmOutcome::Declined },
+        _ = tokio::time::sleep(CONFIRM_TIMEOUT) => {
+            // El diálogo huérfano queda hasta que alguien lo cierre; su respuesta
+            // tardía se descarta (la sesión ya se rechazó).
+            ConfirmOutcome::Declined
+        }
+    }
+}
+
+/// Mutex con nombre por sesión de Windows: el proceso que lo crea "posee" el
+/// prompt de confirmación. Se guarda el HANDLE como isize para poder cruzar
+/// `.await` (los punteros crudos no son Send).
+#[cfg(windows)]
+struct PromptGuard(isize);
+
+#[cfg(windows)]
+impl PromptGuard {
+    fn acquire() -> Option<Self> {
+        use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+        use windows_sys::Win32::System::Threading::CreateMutexW;
+        let name: Vec<u16> = "Local\\Remotix-Confirm-Prompt\0".encode_utf16().collect();
+        let h = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+        if h.is_null() {
+            // Sin mutex disponible: mejor preguntar (posible diálogo doble) que
+            // no preguntar nunca.
+            return Some(Self(0));
+        }
+        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+            unsafe { windows_sys::Win32::Foundation::CloseHandle(h) };
+            return None;
+        }
+        Some(Self(h as isize))
+    }
+}
+
+#[cfg(windows)]
+impl Drop for PromptGuard {
+    fn drop(&mut self) {
+        if self.0 != 0 {
+            unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0 as *mut core::ffi::c_void) };
+        }
+    }
+}
+
+/// Cambia el toggle "pedir permiso antes de conectar" en el servidor (REST,
+/// autenticado con el secreto del device). El servidor difunde `confirm_mode`
+/// a todos los procesos del equipo, que es lo que actualiza los checkboxes.
+pub async fn set_confirm_mode(value: bool) -> anyhow::Result<()> {
+    let cfg = LiteConfig::load().ok_or_else(|| anyhow::anyhow!("equipo sin registrar"))?;
+    let url = format!("{}/api/device/confirm-mode", to_http(&cfg.server));
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .json(&serde_json::json!({ "deviceId": cfg.device_id, "secret": cfg.secret, "value": value }))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        anyhow::bail!("no se pudo guardar el modo ({})", resp.status());
+    }
     Ok(())
 }

@@ -65,6 +65,7 @@ fn main() -> Result<()> {
                     LiteEvent::Code(c) => println!("CODE {c}"),
                     LiteEvent::Status(s) => println!("STATUS {s}"),
                     LiteEvent::UpdateAvailable => println!("UPDATE available"),
+                    LiteEvent::ConfirmMode(v) => println!("CONFIRM {v}"),
                 }
             }
         });
@@ -74,16 +75,17 @@ fn main() -> Result<()> {
 
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     let (tx, rx) = std::sync::mpsc::channel::<LiteEvent>();
-    rt.spawn(run_lite_unattended(server, name, tx));
+    rt.spawn(run_lite_unattended(server, name, tx.clone()));
+    let handle = rt.handle().clone();
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([400.0, 360.0])
+            .with_inner_size([400.0, 390.0])
             .with_resizable(false)
             .with_title("Remotix"),
         ..Default::default()
     };
-    eframe::run_native("Remotix", options, Box::new(move |_cc| Ok(Box::new(LiteApp::new(rx)))))
+    eframe::run_native("Remotix", options, Box::new(move |_cc| Ok(Box::new(LiteApp::new(rx, tx, handle)))))
         .map_err(|e| anyhow::anyhow!("error de la ventana: {e}"))?;
     Ok(())
 }
@@ -94,14 +96,26 @@ fn format_key(k: &str) -> String {
 
 struct LiteApp {
     rx: Receiver<LiteEvent>,
+    /// Para auto-enviarse eventos (p. ej. revertir el checkbox si el POST falla).
+    tx: std::sync::mpsc::Sender<LiteEvent>,
+    rt: tokio::runtime::Handle,
     code: Option<String>,
     status: String,
     autostart: bool,
+    require_confirm: bool,
 }
 
 impl LiteApp {
-    fn new(rx: Receiver<LiteEvent>) -> Self {
-        Self { rx, code: None, status: "Iniciando…".into(), autostart: autostart::is_autostart() }
+    fn new(rx: Receiver<LiteEvent>, tx: std::sync::mpsc::Sender<LiteEvent>, rt: tokio::runtime::Handle) -> Self {
+        Self {
+            rx,
+            tx,
+            rt,
+            code: None,
+            status: "Iniciando…".into(),
+            autostart: autostart::is_autostart(),
+            require_confirm: false,
+        }
     }
 }
 
@@ -112,6 +126,7 @@ impl eframe::App for LiteApp {
                 LiteEvent::Code(c) => self.code = Some(c),
                 LiteEvent::Status(s) => self.status = s,
                 LiteEvent::UpdateAvailable => {} // el servicio (canal host) actualiza
+                LiteEvent::ConfirmMode(v) => self.require_confirm = v,
             }
         }
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -136,6 +151,18 @@ impl eframe::App for LiteApp {
                 ui.add_space(14.0);
                 if ui.checkbox(&mut self.autostart, "Iniciar con Windows").changed() {
                     let _ = autostart::set_autostart(self.autostart);
+                }
+                // Toggle opcional por equipo: por defecto APAGADO (acceso
+                // desatendido puro). El valor real vive en el servidor; si el
+                // POST falla se revierte el checkbox al valor anterior.
+                if ui.checkbox(&mut self.require_confirm, "Pedir permiso antes de conectar").changed() {
+                    let value = self.require_confirm;
+                    let tx = self.tx.clone();
+                    self.rt.spawn(async move {
+                        if remotix_agent::device::set_confirm_mode(value).await.is_err() {
+                            let _ = tx.send(LiteEvent::ConfirmMode(!value));
+                        }
+                    });
                 }
             });
         });

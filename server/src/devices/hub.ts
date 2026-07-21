@@ -4,6 +4,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { db, tables } from '../db/index.js';
 import { verifySecret } from '../auth/password.js';
 import { readManifest, versionIsNewer } from '../routes/update.js';
+import { declineRemoteSession } from '../ws/signaling.js';
 
 // Dispositivos Lite desatendidos en línea (deviceId → sockets). Un mismo equipo
 // puede tener VARIOS procesos conectados (la app con ventana + el ayudante del
@@ -91,13 +92,24 @@ export function attachDeviceHub(server: Server): void {
           await db.update(tables.devices)
             .set({ lastSeenAt: new Date(), ...(version ? { agentVersion: version } : {}) })
             .where(eq(tables.devices.id, deviceId));
-          ws.send(JSON.stringify({ type: 'ready', accessKey: dev.accessKey, name: dev.name }));
+          ws.send(JSON.stringify({ type: 'ready', accessKey: dev.accessKey, name: dev.name, requireConfirm: !!dev.requireConfirm }));
           // Push de actualización: si este agente ya está desactualizado, que lo
           // sepa de inmediato (no dentro de 30 min cuando le toque sondear).
           notifyIfOutdated(ws);
         } else {
           ws.send(JSON.stringify({ type: 'error', code: 'auth_failed' }));
         }
+        return;
+      }
+
+      // Mensajes que exigen un device ya autenticado en este socket.
+      if (!deviceId) return;
+
+      // El usuario del equipo rechazó (o expiró) una conexión con confirmación:
+      // se lo comunicamos al operador que espera en la sala reservada.
+      if (msg.type === 'declined' && typeof msg.code === 'string') {
+        declineRemoteSession(msg.code, deviceId);
+        return;
       }
     });
 

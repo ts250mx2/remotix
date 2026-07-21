@@ -92,6 +92,8 @@ fn run_tray(rx: Receiver<LiteEvent>) -> Result<()> {
                         // La actualización del host la aplica el SERVICIO (canal
                         // host); el ayudante no se auto-actualiza.
                         LiteEvent::UpdateAvailable => {}
+                        // El toggle de confirmación se muestra/edita en la ventana.
+                        LiteEvent::ConfirmMode(_) => {}
                     }
                 }
             }

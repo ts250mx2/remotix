@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, text, int, datetime, index, primaryKey } from 'drizzle-orm/mysql-core';
+import { mysqlTable, varchar, text, int, datetime, index, primaryKey, boolean } from 'drizzle-orm/mysql-core';
 
 // Timestamp con precisión de milisegundos que Drizzle mapea a `Date` en ambos
 // sentidos (insert acepta Date, select devuelve Date), igual que hacía el modo
@@ -49,6 +49,9 @@ export const devices = mysqlTable(
     // Versión del agente instalada, reportada en el `hello` del WS. Permite ver
     // qué PC tiene qué versión y disparar la auto-actualización.
     agentVersion: varchar('agent_version', { length: 32 }),
+    // Si el usuario del equipo debe aprobar cada conexión entrante (toggle en el
+    // Lite). false = desatendido puro (por defecto, estilo TeamViewer).
+    requireConfirm: boolean('require_confirm').notNull().default(false),
     lastSeenAt: ts('last_seen_at'),
     createdAt: ts('created_at').notNull(),
   },
